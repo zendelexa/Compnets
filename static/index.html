@@ -4,7 +4,7 @@
     <title>Go WebSocket Chat</title>
     <style>
         body { font-family: Arial, sans-serif; max-width: 600px; margin: 0 auto; padding: 20px; }
-        #chat { border: 1px solid #ccc; height: 300px; overflow-y: scroll; padding: 10px; margin-bottom: 10px; }
+        .chat { border: 1px solid #ccc; height: 100px; overflow-y: scroll; padding: 10px; margin-bottom: 5px; margin-top: 5px; }
         .message { margin-bottom: 10px; }
         .username { font-weight: bold; color: #3366cc; }
         .time { color: #999; font-size: 0.8em; }
@@ -13,69 +13,149 @@
 <body>
     <h1>WebSocket Chat на Go</h1>
     
-    <div id="chat"></div>
+    <!-- <div id="chat"></div> -->
     
-    <input type="text" id="message" placeholder="Сообщение" style="width: 300px;">
-    <button onclick="sendMessage()">Отправить</button>
+    <div style="border: 10px;">
+        Добавить человека в чат:
+        <input type="text" id="new_chat_id" placeholder="ID чата (оставьте пустым, чтобы создать новый чат)" style="width: 150px;">
+        <input type="text" id= "new_chat_uid" placeholder="ID человека">
+        <button id="new_chat_button" onclick="sendAddChat()">Добавить</button>
+    </div>
+    
+    
     <div id="my_uid"></div>
 
-    <script>
-        const chat = document.getElementById('chat');
-        const messageInput = document.getElementById('message');
+    <div id="chats">
+    </div>
 
-        var username = prompt("Введите своё имя:", "Гость");
+    <script>
+        chats_map = {};
+
+        const chats = document.getElementById('chats');
+        // const messageInput = document.getElementById('message');
+
+        var my_username = prompt("Введите своё имя:", "Гость");
+        var my_uid = -1;
+
+        addChat(-1, false);
 
         
         // Подключаемся к WebSocket серверу
-        const ws = new WebSocket('ws://localhost:8080/ws/' + username);
+        const ws = new WebSocket('ws://localhost:8080/ws/' + my_username);
         
         ws.onopen = function() {
-            addMessage('Система', 'Подключено к серверу');
+            addMessage(-1, 'Система', 'Подключено к серверу');
         };
         
         ws.onclose = function() {
-            addMessage('Система', 'Соединение закрыто');
+            addMessage(-1, 'Система', 'Соединение закрыто');
         };
         
         ws.onmessage = function(event) {
             event = JSON.parse(event.data);
-            alert(event.data);
+            // alert(event.event_type + " " + event.data);
+            // Заменить на switch
             if (event.event_type == "message") {
                 const msg = JSON.parse(event.data);
-                addMessage(msg.sender.username, msg.message);
+                addMessage(msg.chat_id, msg.sender.username, msg.message);
             }
             else if (event.event_type == "uid") {
-                const uid = JSON.parse(event.data);
-                document.getElementById('my_uid').innerText = "Ваш ID: " + uid;
+                my_uid = JSON.parse(event.data);
+                document.getElementById('my_uid').innerText = "Ваш ID: " + my_uid;
+            }
+            else if (event.event_type == "invitation") {
+                // alert("invitation");
+                const chat_id = parseInt(event.data);
+                addChat(chat_id);
             }
         };
         
-        function sendMessage() {
+        function sendMessage(chat_id, messageInput) {
             const message = messageInput.value;
             
             if (message) {
                 ws.send(JSON.stringify({
-                    message: message
+                    event_type: "message",
+                    sender_uid: my_uid,
+                    data: JSON.stringify({
+                        message: message,
+                        sender: {
+                            uid: my_uid,
+                            username: my_username,
+                        },
+                        chat_id: chat_id,
+                    })
+                    
                 }));
                 messageInput.value = '';
             }
         }
+
+        function addChat(chat_id, can_send_messages=true) {
+            const chat_index = Object.keys(chats_map).length;
+            chats_map[chat_id] = chat_index;
+            chats.appendChild(document.createElement('div'));
+
+            const chatElement = document.createElement('div');
+            chatElement.className = 'chat';
+            chats.lastElementChild.appendChild(chatElement);
+
+            if (!can_send_messages) return;
+
+            const inputElement = document.createElement('input');
+            inputElement.type = 'text';
+            inputElement.style ='width: 300px;';
+            inputElement.placeholder = 'Сообщение';
+            // Отправка по Enter
+            inputElement.addEventListener('keypress', function(e) {
+                if (e.key === 'Enter') {
+                    sendMessage(chat_id, inputElement);
+                }
+            });
+            chats.lastElementChild.appendChild(inputElement);
+
+            const buttonElement = document.createElement('button');
+            buttonElement.innerText = 'Отправить';
+            buttonElement.onclick = () => sendMessage(chat_id, chats.lastElementChild.lastElementChild); // Сомнительный момент
+            chats.lastElementChild.appendChild(buttonElement);
+        }
         
-        function addMessage(username, message, time = new Date().toLocaleTimeString()) {
+        function addMessage(chat_id, username, message, time = new Date().toLocaleTimeString()) {
             const messageElement = document.createElement('div');
             messageElement.className = 'message';
             messageElement.innerHTML = `
                 <span class="username">${username}:</span>
                 ${message}
             `;
+            let chat = chats.children[chats_map[chat_id]].children[0];
             chat.appendChild(messageElement);
             chat.scrollTop = chat.scrollHeight;
         }
-        
-        // Отправка по Enter
-        messageInput.addEventListener('keypress', function(e) {
+
+        function sendAddChat() {
+            const chatIdElement = document.getElementById("new_chat_id");
+            const chatUidElement = document.getElementById("new_chat_uid");
+
+            new_chat_id = chatIdElement.value;
+            if (new_chat_id == "") new_chat_id = "-1";
+            new_chat_uid = chatUidElement.value;
+
+            ws.send(JSON.stringify({
+                event_type: "invitation",
+                sender_uid: my_uid,
+                data: JSON.stringify({
+                    chat_id: parseInt(new_chat_id),
+                    user_id: parseInt(new_chat_uid),
+                }),
+            }));
+
+            chatIdElement.value = "";
+            chatUidElement.value = "";
+        }
+
+        document.getElementById("new_chat_button").addEventListener('keypress', function(e) {
             if (e.key === 'Enter') {
-                sendMessage();
+                sendAddChat();
             }
         });
     </script>
