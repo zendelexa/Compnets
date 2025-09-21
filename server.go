@@ -167,8 +167,6 @@ func handleEvents() {
 
 			new_chat_id := invitation.Chat_id
 			is_new_chat := false
-			log.Printf("DBG: %d", new_chat_id)
-			log.Printf("DBG: %d %d", event.Sender_uid, invitation.User_id)
 			if new_chat_id == -1 {
 				is_new_chat = true
 				new_chat_id = len(chats)

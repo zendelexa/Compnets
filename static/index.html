@@ -4,7 +4,7 @@
     <title>Go WebSocket Chat</title>
     <style>
         body { font-family: Arial, sans-serif; max-width: 600px; margin: 0 auto; padding: 20px; }
-        .chat { border: 1px solid #ccc; height: 100px; overflow-y: scroll; padding: 10px; margin-bottom: 5px; margin-top: 5px; }
+        .chat { border: 1px solid #ccc; height: 100px; overflow-y: scroll; padding: 10px; margin-bottom: 3px; margin-top: 15px; }
         .message { margin-bottom: 10px; }
         .username { font-weight: bold; color: #3366cc; }
         .time { color: #999; font-size: 0.8em; }
@@ -100,6 +100,10 @@
             chatElement.className = 'chat';
             chats.lastElementChild.appendChild(chatElement);
 
+            const chatIdElement = document.createElement('div');
+            chatIdElement.innerText = "ID чата: " + chat_id;
+            chats.lastElementChild.appendChild(chatIdElement);
+
             if (!can_send_messages) return;
 
             const inputElement = document.createElement('input');
@@ -153,7 +157,7 @@
             chatUidElement.value = "";
         }
 
-        document.getElementById("new_chat_button").addEventListener('keypress', function(e) {
+        document.getElementById("new_chat_uid").addEventListener('keypress', function(e) {
             if (e.key === 'Enter') {
                 sendAddChat();
             }
