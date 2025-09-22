@@ -13,8 +13,6 @@
 <body>
     <h1>WebSocket Chat на Go</h1>
     
-    <!-- <div id="chat"></div> -->
-    
     <div style="border: 10px;">
         Добавить человека в чат:
         <input type="text" id="new_chat_id" placeholder="ID чата (оставьте пустым, чтобы создать новый чат)" style="width: 150px;">
@@ -67,6 +65,12 @@
                 // alert("invitation");
                 const chat_id = parseInt(event.data);
                 addChat(chat_id);
+
+                // ws.send(JSON.stringify({
+                //     event_type: "retrieval",
+                //     sender_uid: my_uid,
+                //     data: chat_id
+                // }))
             }
         };
         
@@ -158,6 +162,12 @@
         }
 
         document.getElementById("new_chat_uid").addEventListener('keypress', function(e) {
+            if (e.key === 'Enter') {
+                sendAddChat();
+            }
+        });
+
+        document.getElementById("new_chat_id").addEventListener('keypress', function(e) {
             if (e.key === 'Enter') {
                 sendAddChat();
             }

@@ -10,6 +10,10 @@ import (
 	"github.com/gorilla/websocket"
 )
 
+// Прототип. Ранее не писал такие приложения,
+// по возможности буду рефакторить
+// TODO: Рефакторить
+
 type User struct {
 	Uid       int    `json:"uid"`
 	Username  string `json:"username"`
@@ -38,7 +42,7 @@ type Message struct {
 
 type Chat struct {
 	Chat_id  int `json:"chat_id"`
-	User_wss []*websocket.Conn
+	User_wss map[*websocket.Conn]bool
 	Messages []Message
 }
 
@@ -57,11 +61,13 @@ const (
 	NEW_MESSAGE = "message"
 	INVITATION  = "invitation"
 	GET_UID     = "uid"
+	RETRIEVAL   = "retrieval"
 )
 
 func main() {
 	chats = append(chats, Chat{
-		Chat_id: 0,
+		Chat_id:  0,
+		User_wss: make(map[*websocket.Conn]bool),
 	})
 
 	// Статические файлы (наш HTML/JS клиент)
@@ -103,7 +109,6 @@ func handleConnections(w http.ResponseWriter, r *http.Request) {
 	// Регистрируем нового клиента
 	clients[ws] = user
 	websockets[user.Uid] = ws
-	chats[0].User_wss = append(chats[0].User_wss, ws)
 
 	event := Event{
 		Event_type: GET_UID,
@@ -119,6 +124,20 @@ func handleConnections(w http.ResponseWriter, r *http.Request) {
 		Data:       "0",
 	}
 	ws.WriteJSON(event)
+
+	chats[0].User_wss[ws] = true
+	for _, msg := range chats[0].Messages {
+		bytes, err := json.Marshal(msg)
+		if err != nil {
+			log.Printf("Ошибка восстановления чата: %v", err)
+		}
+		msg_retrieval := Event{
+			Event_type: NEW_MESSAGE,
+			Sender_uid: msg.Sender.Uid,
+			Data:       string(bytes),
+		}
+		websockets[user.Uid].WriteJSON(msg_retrieval)
+	}
 
 	for {
 		var event Event
@@ -149,7 +168,7 @@ func handleEvents() {
 			}
 			chat := &chats[msg.Chat_id]
 			chat.Messages = append(chat.Messages, msg)
-			for _, user_ws := range chat.User_wss {
+			for user_ws, _ := range chat.User_wss {
 				err := user_ws.WriteJSON(event)
 				if err != nil {
 					log.Printf("Ошибка записи: %v", err)
@@ -172,10 +191,10 @@ func handleEvents() {
 				new_chat_id = len(chats)
 				chats = append(chats, Chat{
 					Chat_id:  new_chat_id,
-					User_wss: []*websocket.Conn{websockets[event.Sender_uid]},
+					User_wss: map[*websocket.Conn]bool{websockets[event.Sender_uid]: true},
 				})
 			}
-			chats[new_chat_id].User_wss = append(chats[new_chat_id].User_wss, websockets[invitation.User_id])
+			chats[new_chat_id].User_wss[websockets[invitation.User_id]] = true
 
 			response := Event{
 				Event_type: INVITATION,
@@ -184,8 +203,32 @@ func handleEvents() {
 
 			if is_new_chat {
 				websockets[event.Sender_uid].WriteJSON(response)
+				for _, msg := range chats[new_chat_id].Messages {
+					bytes, err := json.Marshal(msg)
+					if err != nil {
+						log.Printf("Ошибка восстановления чата: %v", err)
+					}
+					msg_retrieval := Event{
+						Event_type: NEW_MESSAGE,
+						Sender_uid: msg.Sender.Uid,
+						Data:       string(bytes),
+					}
+					websockets[event.Sender_uid].WriteJSON(msg_retrieval)
+				}
 			}
 			websockets[invitation.User_id].WriteJSON(response)
+			for _, msg := range chats[new_chat_id].Messages {
+				bytes, err := json.Marshal(msg)
+				if err != nil {
+					log.Printf("Ошибка восстановления чата: %v", err)
+				}
+				msg_retrieval := Event{
+					Event_type: NEW_MESSAGE,
+					Sender_uid: msg.Sender.Uid,
+					Data:       string(bytes),
+				}
+				websockets[invitation.User_id].WriteJSON(msg_retrieval)
+			}
 		}
 	}
 }
