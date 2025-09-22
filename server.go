@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"log"
 	"net/http"
+	"os"
 	"strconv"
 	"strings"
 
@@ -35,9 +36,15 @@ var upgrader = websocket.Upgrader{
 
 // Структура для сообщений
 type Message struct {
-	Sender  User   `json:"sender"`
-	Message string `json:"message"`
-	Chat_id int    `json:"chat_id"`
+	Sender   User   `json:"sender"`
+	Message  string `json:"message"`
+	Chat_id  int    `json:"chat_id"`
+	Filename string `json:"filename"`
+}
+
+type File struct {
+	Content  string `json:"content"`
+	Filename string `json:"filename"`
 }
 
 type Chat struct {
@@ -62,6 +69,7 @@ const (
 	INVITATION  = "invitation"
 	GET_UID     = "uid"
 	RETRIEVAL   = "retrieval"
+	FILE        = "file"
 )
 
 func main() {
@@ -161,21 +169,52 @@ func handleEvents() {
 		// Заменить на switch
 		switch event.Event_type {
 		case NEW_MESSAGE:
+
 			var msg Message
 			err := json.Unmarshal([]byte(event.Data), &msg)
 			if err != nil {
 				log.Printf("Ошибка чтения сообщения: %v", err)
 			}
+
 			chat := &chats[msg.Chat_id]
 			chat.Messages = append(chat.Messages, msg)
-			for user_ws, _ := range chat.User_wss {
-				err := user_ws.WriteJSON(event)
+
+			if msg.Filename != "" {
+				// data, err := base64.StdEncoding.DecodeString(msg.Message)
+				// if err != nil {
+				// 	log.Fatal(err)
+				// }
+				// err = os.WriteFile("attachments/"+msg.Filename, data, 0644)
+				err = os.WriteFile("attachments/"+msg.Filename, []byte(msg.Message), 0644)
 				if err != nil {
-					log.Printf("Ошибка записи: %v", err)
-					user_ws.Close()
-					delete(clients, user_ws)
+					log.Fatal(err)
+				}
+
+				msg.Message = ""
+				data, err := json.Marshal(msg)
+				if err != nil {
+					log.Fatal(err)
+				}
+				event.Data = string(data)
+				for user_ws := range chat.User_wss {
+					err := user_ws.WriteJSON(event)
+					if err != nil {
+						log.Printf("Ошибка записи: %v", err)
+						user_ws.Close()
+						delete(clients, user_ws)
+					}
+				}
+			} else {
+				for user_ws := range chat.User_wss {
+					err := user_ws.WriteJSON(event)
+					if err != nil {
+						log.Printf("Ошибка записи: %v", err)
+						user_ws.Close()
+						delete(clients, user_ws)
+					}
 				}
 			}
+
 		case INVITATION:
 			var invitation Invitation
 			err := json.Unmarshal([]byte(event.Data), &invitation)
@@ -229,6 +268,28 @@ func handleEvents() {
 				}
 				websockets[invitation.User_id].WriteJSON(msg_retrieval)
 			}
+		case FILE:
+			data, err := os.ReadFile("attachments/" + event.Data)
+			if err != nil {
+				log.Fatal(err)
+			}
+
+			file := File{
+				Content:  string(data),
+				Filename: event.Data,
+			}
+
+			data, err = json.Marshal(file)
+			if err != nil {
+				log.Fatal(err)
+			}
+
+			response := Event{
+				Event_type: FILE,
+				Data:       string(data),
+			}
+
+			websockets[event.Sender_uid].WriteJSON(response)
 		}
 	}
 }

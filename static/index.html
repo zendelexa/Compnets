@@ -17,6 +17,7 @@
         Добавить человека в чат:
         <input type="text" id="new_chat_id" placeholder="ID чата (оставьте пустым, чтобы создать новый чат)" style="width: 150px;">
         <input type="text" id= "new_chat_uid" placeholder="ID человека">
+        <!-- <input type="file" -->
         <button id="new_chat_button" onclick="sendAddChat()">Добавить</button>
     </div>
     
@@ -55,27 +56,33 @@
             // Заменить на switch
             if (event.event_type == "message") {
                 const msg = JSON.parse(event.data);
-                addMessage(msg.chat_id, msg.sender.username, msg.message);
+                if (msg.filename != "") {
+                    addFile(msg.chat_id, msg.sender.username, msg.filename);
+                }
+                else {
+                    addMessage(msg.chat_id, msg.sender.username, msg.message);
+                }
             }
             else if (event.event_type == "uid") {
                 my_uid = JSON.parse(event.data);
                 document.getElementById('my_uid').innerText = "Ваш ID: " + my_uid;
             }
             else if (event.event_type == "invitation") {
-                // alert("invitation");
                 const chat_id = parseInt(event.data);
                 addChat(chat_id);
-
-                // ws.send(JSON.stringify({
-                //     event_type: "retrieval",
-                //     sender_uid: my_uid,
-                //     data: chat_id
-                // }))
+            }
+            else if (event.event_type == "file") {
+                const a = document.createElement('a');
+                data = JSON.parse(event.data);
+                a.href = data.content;
+                a.download = data.filename;
+                a.click();
             }
         };
         
-        function sendMessage(chat_id, messageInput) {
+        function sendMessage(chat_id, messageInput, fileInput) {
             const message = messageInput.value;
+            const flies = fileInput.flies;
             
             if (message) {
                 ws.send(JSON.stringify({
@@ -88,10 +95,42 @@
                             username: my_username,
                         },
                         chat_id: chat_id,
+                        filename: "",
                     })
-                    
                 }));
                 messageInput.value = '';
+            }
+
+            for (const file of fileInput.files) {
+                let name = file.name;
+
+                let reader = new FileReader();
+                reader.readAsDataURL(file);
+
+                reader.onload = function() {
+                    console.log(reader.result);
+                    ws.send(JSON.stringify({
+                        event_type: "message",
+                        sender_uid: my_uid,
+                        data: JSON.stringify({
+                            message: reader.result,
+                            sender: {
+                                uid: my_uid,
+                                username: my_username,
+                            },
+                            chat_id: chat_id,
+                            filename: name,
+                        })
+                    }));
+                };
+
+                reader.onerror = function() {
+                    console.log(reader.error);
+                };
+            }
+
+            if (fileInput.files.length) {
+                fileInput.value = '';
             }
         }
 
@@ -114,17 +153,33 @@
             inputElement.type = 'text';
             inputElement.style ='width: 300px;';
             inputElement.placeholder = 'Сообщение';
+            
+            
+
+            const fileElement = document.createElement('input');
+            fileElement.type = 'file';
+            fileElement.style ='width: 100px;';
+            fileElement.placeholder = 'Файл';
             // Отправка по Enter
             inputElement.addEventListener('keypress', function(e) {
                 if (e.key === 'Enter') {
-                    sendMessage(chat_id, inputElement);
+                    sendMessage(chat_id, inputElement, fileElement);
+                }
+            });
+            // Отправка по Enter
+            fileElement.addEventListener('keypress', function(e) {
+                if (e.key === 'Enter') {
+                    sendMessage(chat_id, inputElement, fileElement);
                 }
             });
             chats.lastElementChild.appendChild(inputElement);
+            chats.lastElementChild.appendChild(fileElement);
 
             const buttonElement = document.createElement('button');
             buttonElement.innerText = 'Отправить';
-            buttonElement.onclick = () => sendMessage(chat_id, chats.lastElementChild.lastElementChild); // Сомнительный момент
+            buttonElement.onclick = () => sendMessage(chat_id, chats.lastElementChild.lastElementChild,
+                chats.lastElementChild.children[chats.lastElementChild.children.length - 2]
+            ); // Сомнительный момент
             chats.lastElementChild.appendChild(buttonElement);
         }
         
@@ -159,6 +214,27 @@
 
             chatIdElement.value = "";
             chatUidElement.value = "";
+        }
+
+        function addFile(chat_id, username, filename) {
+            const messageElement = document.createElement('div');
+            messageElement.className = 'message';
+            messageElement.innerHTML = `
+                <span class="username">${username}:</span>
+            `;
+            const buttonElement = document.createElement('button');
+            buttonElement.innerText = filename;
+            buttonElement.onclick = () => {
+                ws.send(JSON.stringify({
+                    event_type: "file",
+                    sender_uid: my_uid,
+                    data: filename,
+                }));
+            }
+            messageElement.appendChild(buttonElement);
+            let chat = chats.children[chats_map[chat_id]].children[0];
+            chat.appendChild(messageElement);
+            chat.scrollTop = chat.scrollHeight;
         }
 
         document.getElementById("new_chat_uid").addEventListener('keypress', function(e) {
