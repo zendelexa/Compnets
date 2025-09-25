@@ -5,6 +5,7 @@
     <style>
         body { font-family: Arial, sans-serif; max-width: 600px; margin: 0 auto; padding: 20px; }
         .chat { border: 1px solid #ccc; height: 100px; overflow-y: scroll; padding: 10px; margin-bottom: 3px; margin-top: 15px; }
+        .users { border: 1px solid #ccc; height: 100px; overflow-y: scroll; padding: 10px; margin-bottom: 3px; margin-top: 15px; }
         .message { margin-bottom: 10px; }
         .username { font-weight: bold; color: #3366cc; }
         .time { color: #999; font-size: 0.8em; }
@@ -78,6 +79,10 @@
                 a.download = data.filename;
                 a.click();
             }
+            else if (event.event_type == "addition") {
+                data = JSON.parse(event.data);
+                addUser(data.chat_id, data.username, data.is_admin);
+            }
         };
         
         function sendMessage(chat_id, messageInput, fileInput) {
@@ -143,6 +148,10 @@
             chatElement.className = 'chat';
             chats.lastElementChild.appendChild(chatElement);
 
+            const usersElement = document.createElement('div');
+            usersElement.className = 'users';
+            chats.lastElementChild.appendChild(usersElement);
+
             const chatIdElement = document.createElement('div');
             chatIdElement.innerText = "ID чата: " + chat_id;
             chats.lastElementChild.appendChild(chatIdElement);
@@ -181,6 +190,31 @@
                 chats.lastElementChild.children[chats.lastElementChild.children.length - 2]
             ); // Сомнительный момент
             chats.lastElementChild.appendChild(buttonElement);
+        }
+
+        function addUser(chat_id, username, is_admin) {
+            const userElement = document.createElement('div');
+            userElement.innerText = username;
+
+            const isAdmin = document.createElement('div');
+            if (is_admin) isAdmin.innerText = '(Admin)';
+            userElement.appendChild(isAdmin);
+            
+            kickButton = document.createElement('button');
+            muteButton = document.createElement('button');
+            addAdminButton = document.createElement('button');
+
+            kickButton.innerText = '👟';
+            muteButton.innerText = '🔇';
+            addAdminButton.innerText = '👑';
+
+            userElement.appendChild(kickButton);
+            userElement.appendChild(muteButton);
+            userElement.appendChild(addAdminButton);
+
+            let usersElement = chats.children[chats_map[chat_id]].children[1];
+            usersElement.appendChild(userElement);
+            usersElement.scrollTop = usersElement.scrollHeight;
         }
         
         function addMessage(chat_id, username, message, time = new Date().toLocaleTimeString()) {
