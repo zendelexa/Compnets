@@ -30,6 +30,7 @@
 
     <script>
         chats_map = {};
+        chats_users_map = {};
 
         const chats = document.getElementById('chats');
         // const messageInput = document.getElementById('message');
@@ -81,7 +82,45 @@
             }
             else if (event.event_type == "addition") {
                 data = JSON.parse(event.data);
-                addUser(data.chat_id, data.username, data.is_admin);
+                addUser(data.chat_id, data.user_id, data.username, data.is_admin);
+            }
+            else if (event.event_type == "toggle_user_info") {
+                data = JSON.parse(event.data);
+                users_element = chats.children[chats_map[data.chat_id]].children[1];
+
+                if (data.is_admin) {
+                    is_admin_now = chats_users_map[data.chat_id][data.user_id].is_admin;
+                    chats_users_map[data.chat_id][data.user_id].is_admin = !is_admin_now;
+                    
+                    if (is_admin_now) {
+                        users_element.children[chats_users_map[data.chat_id][data.user_id].position].children[0].innerText = "";
+                    }
+                    else {
+                        users_element.children[chats_users_map[data.chat_id][data.user_id].position].children[0].innerText = "(Admin)";
+                    }
+                }
+
+                if (data.is_muted) {
+                    is_muted_now = chats_users_map[data.chat_id][data.user_id].is_muted;
+                    chats_users_map[data.chat_id][data.user_id].is_muted = !is_muted_now;
+                    
+                    if (is_muted_now) {
+                        users_element.children[chats_users_map[data.chat_id][data.user_id].position].children[1].innerText = "";
+                    }
+                    else {
+                        users_element.children[chats_users_map[data.chat_id][data.user_id].position].children[1].innerText = "(Muted)";
+                    }
+                }
+
+                if (data.is_kicked) {                    
+                    // FIXME: perform the actual deletion
+                    users_element.children[chats_users_map[data.chat_id][data.user_id].position].innerHTML = "";
+
+                    // FIXME: perform the actual deletion
+                    if (data.user_id == my_uid) {
+                        chats.children[chats_map[data.chat_id]].innerHTML = "";
+                    }
+                }
             }
         };
         
@@ -142,6 +181,7 @@
         function addChat(chat_id, can_send_messages=true) {
             const chat_index = Object.keys(chats_map).length;
             chats_map[chat_id] = chat_index;
+            chats_users_map[chat_id] = {};
             chats.appendChild(document.createElement('div'));
 
             const chatElement = document.createElement('div');
@@ -192,13 +232,23 @@
             chats.lastElementChild.appendChild(buttonElement);
         }
 
-        function addUser(chat_id, username, is_admin) {
+        function addUser(chat_id, user_id, username, is_admin) {
+            chats_users_map[chat_id][user_id] = {
+                "username": username,
+                "is_admin": is_admin,
+                "is_muted": false,
+                "position": Object.keys(chats_users_map[chat_id]).length,
+            };
+
             const userElement = document.createElement('div');
-            userElement.innerText = username;
+            userElement.innerText = "" + user_id + ": " + username;
 
             const isAdmin = document.createElement('div');
             if (is_admin) isAdmin.innerText = '(Admin)';
             userElement.appendChild(isAdmin);
+
+            const isMuted = document.createElement('div');
+            userElement.appendChild(isMuted);
             
             kickButton = document.createElement('button');
             muteButton = document.createElement('button');
@@ -207,6 +257,48 @@
             kickButton.innerText = '👟';
             muteButton.innerText = '🔇';
             addAdminButton.innerText = '👑';
+
+            kickButton.onclick = () => {
+                ws.send(JSON.stringify({
+                    event_type: "toggle_user_info",
+                    sender_uid: my_uid,
+                    data: JSON.stringify({
+                        user_id: user_id,
+                        chat_id: chat_id,
+                        is_admin: false,
+                        is_muted: false,
+                        is_kicked: true,
+                    })
+                }));
+            }
+
+            muteButton.onclick = () => {
+                ws.send(JSON.stringify({
+                    event_type: "toggle_user_info",
+                    sender_uid: my_uid,
+                    data: JSON.stringify({
+                        user_id: user_id,
+                        chat_id: chat_id,
+                        is_admin: false,
+                        is_muted: true,
+                        is_kicked: false,
+                    })
+                }));
+            }
+
+            addAdminButton.onclick = () => {
+                ws.send(JSON.stringify({
+                    event_type: "toggle_user_info",
+                    sender_uid: my_uid,
+                    data: JSON.stringify({
+                        user_id: user_id,
+                        chat_id: chat_id,
+                        is_admin: true,
+                        is_muted: false,
+                        is_kicked: false,
+                    })
+                }));
+            }
 
             userElement.appendChild(kickButton);
             userElement.appendChild(muteButton);

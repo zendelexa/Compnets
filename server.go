@@ -52,6 +52,14 @@ type ChatUserInfo struct {
 	Is_muted bool `json:"is_muted"`
 }
 
+type ToggleUserInfo struct {
+	User_id   int  `json:"user_id"`
+	Chat_id   int  `json:"chat_id"`
+	Is_admin  bool `json:"is_admin"`
+	Is_muted  bool `json:"is_muted"`
+	Is_kicked bool `json:"is_kicked"`
+}
+
 type Chat struct {
 	Chat_id  int `json:"chat_id"`
 	User_wss map[*websocket.Conn]ChatUserInfo
@@ -77,12 +85,13 @@ type Addition struct {
 }
 
 const (
-	NEW_MESSAGE = "message"
-	INVITATION  = "invitation"
-	GET_UID     = "uid"
-	RETRIEVAL   = "retrieval"
-	FILE        = "file"
-	ADDITION    = "addition"
+	NEW_MESSAGE      = "message"
+	INVITATION       = "invitation"
+	GET_UID          = "uid"
+	RETRIEVAL        = "retrieval"
+	FILE             = "file"
+	ADDITION         = "addition"
+	TOGGLE_USER_INFO = "toggle_user_info"
 )
 
 func main() {
@@ -142,26 +151,6 @@ func handleConnections(w http.ResponseWriter, r *http.Request) {
 
 	addUserToChat(0, user.Uid, false)
 
-	// event = Event{
-	// 	Event_type: INVITATION,
-	// 	Data:       "0",
-	// }
-	// ws.WriteJSON(event)
-
-	// chats[0].User_wss[ws] = true
-	// for _, msg := range chats[0].Messages {
-	// 	bytes, err := json.Marshal(msg)
-	// 	if err != nil {
-	// 		log.Printf("Ошибка восстановления чата: %v", err)
-	// 	}
-	// 	msg_retrieval := Event{
-	// 		Event_type: NEW_MESSAGE,
-	// 		Sender_uid: msg.Sender.Uid,
-	// 		Data:       string(bytes),
-	// 	}
-	// 	websockets[user.Uid].WriteJSON(msg_retrieval)
-	// }
-
 	for {
 		var event Event
 
@@ -184,11 +173,14 @@ func handleEvents() {
 		// Заменить на switch
 		switch event.Event_type {
 		case NEW_MESSAGE:
-
 			var msg Message
 			err := json.Unmarshal([]byte(event.Data), &msg)
 			if err != nil {
 				log.Printf("Ошибка чтения сообщения: %v", err)
+			}
+
+			if chats[msg.Chat_id].User_wss[websockets[msg.Sender.Uid]].Is_muted {
+				continue
 			}
 
 			chat := &chats[msg.Chat_id]
@@ -243,56 +235,12 @@ func handleEvents() {
 					User_wss: make(map[*websocket.Conn]ChatUserInfo),
 				})
 			}
-			// chats[new_chat_id].User_wss[websockets[invitation.User_id]] = true
-
-			// response := Event{
-			// 	Event_type: INVITATION,
-			// 	Data:       strconv.Itoa(new_chat_id),
-			// }
 
 			if is_new_chat {
-				// websockets[event.Sender_uid].WriteJSON(response)
-
-				// addition := Addition{
-				// 	Chat_id: new_chat_id,
-				// 	User_id: event.Sender_uid,
-				// }
-
-				// for user_ws := range chats[new_chat_id].User_wss {
-				// 	if user_ws != websockets[invitation.User_id] {
-
-				// 	}
-				// }
-
-				// for _, msg := range chats[new_chat_id].Messages {
-				// 	bytes, err := json.Marshal(msg)
-				// 	if err != nil {
-				// 		log.Printf("Ошибка восстановления чата: %v", err)
-				// 	}
-				// 	msg_retrieval := Event{
-				// 		Event_type: NEW_MESSAGE,
-				// 		Sender_uid: msg.Sender.Uid,
-				// 		Data:       string(bytes),
-				// 	}
-				// 	websockets[event.Sender_uid].WriteJSON(msg_retrieval)
-				// }
-
 				addUserToChat(new_chat_id, event.Sender_uid, true)
 			}
-			// websockets[invitation.User_id].WriteJSON(response)
-			// for _, msg := range chats[new_chat_id].Messages {
-			// 	bytes, err := json.Marshal(msg)
-			// 	if err != nil {
-			// 		log.Printf("Ошибка восстановления чата: %v", err)
-			// 	}
-			// 	msg_retrieval := Event{
-			// 		Event_type: NEW_MESSAGE,
-			// 		Sender_uid: msg.Sender.Uid,
-			// 		Data:       string(bytes),
-			// 	}
-			// 	websockets[invitation.User_id].WriteJSON(msg_retrieval)
-			// }
 			addUserToChat(new_chat_id, invitation.User_id, false)
+
 		case FILE:
 			data, err := os.ReadFile("attachments/" + event.Data)
 			if err != nil {
@@ -315,6 +263,42 @@ func handleEvents() {
 			}
 
 			websockets[event.Sender_uid].WriteJSON(response)
+
+		case TOGGLE_USER_INFO:
+			var data ToggleUserInfo
+			err := json.Unmarshal([]byte(event.Data), &data)
+			if err != nil {
+				log.Fatal(err)
+			}
+
+			if !chats[data.Chat_id].User_wss[websockets[event.Sender_uid]].Is_admin {
+				continue
+			}
+
+			for user_ws := range chats[data.Chat_id].User_wss {
+				err := user_ws.WriteJSON(event)
+				if err != nil {
+					log.Printf("Ошибка записи: %v", err)
+					user_ws.Close()
+					delete(clients, user_ws)
+				}
+			}
+
+			if data.Is_admin {
+				chat_user_info := chats[data.Chat_id].User_wss[websockets[data.User_id]]
+				chat_user_info.Is_admin = !chat_user_info.Is_admin
+				chats[data.Chat_id].User_wss[websockets[data.User_id]] = chat_user_info
+				// log.Printf("Is_admin: %b", chats[data.Chat_id].User_wss[websockets[data.User_id]].Is_admin)
+			}
+			if data.Is_muted {
+				chat_user_info := chats[data.Chat_id].User_wss[websockets[data.User_id]]
+				chat_user_info.Is_muted = !chat_user_info.Is_muted
+				chats[data.Chat_id].User_wss[websockets[data.User_id]] = chat_user_info
+				// log.Printf("Is_muted: %b", chats[data.Chat_id].User_wss[websockets[data.User_id]].Is_muted)
+			}
+			if data.Is_kicked {
+				delete(chats[data.Chat_id].User_wss, websockets[data.User_id])
+			}
 		}
 	}
 }
