@@ -16,13 +16,14 @@ import (
 // TODO: Рефакторить
 
 type User struct {
-	Uid       int    `json:"uid"`
-	Username  string `json:"username"`
-	Websocket *websocket.Conn
+	Uid       int             `json:"uid"`
+	Username  string          `json:"username"`
+	Websocket *websocket.Conn `json:"-"`
+	Chat_ids  map[int]bool    `json:"-"`
 }
 
 // Клиенты и каналы для обмена сообщениями
-var clients = make(map[*websocket.Conn]User)
+var clients = make(map[int]User)
 var websockets = make(map[int]*websocket.Conn)
 var events = make(chan Event)
 var chats []Chat
@@ -71,9 +72,9 @@ type ToggleUserInfo struct {
 }
 
 type Chat struct {
-	Chat_id  int `json:"chat_id"`
-	User_wss map[*websocket.Conn]ChatUserInfo
-	Messages []Message
+	Chat_id    int `json:"chat_id"`
+	User_infos map[int]ChatUserInfo
+	Messages   []Message
 }
 
 type Event struct {
@@ -106,8 +107,8 @@ const (
 
 func main() {
 	chats = append(chats, Chat{
-		Chat_id:  0,
-		User_wss: make(map[*websocket.Conn]ChatUserInfo),
+		Chat_id:    0,
+		User_infos: make(map[int]ChatUserInfo),
 	})
 
 	// Статические файлы (наш HTML/JS клиент)
@@ -158,6 +159,12 @@ func handleAuth(w http.ResponseWriter, r *http.Request) {
 			usernames[user_id] = auth_data.Username
 			user_ids[auth_data.Username] = user_id
 			passwords[user_id] = auth_data.Password
+
+			clients[user_id] = User{
+				Uid:      user_id,
+				Username: auth_data.Username,
+				Chat_ids: make(map[int]bool),
+			}
 			is_ok = true
 		} else {
 			// TODO: вынести в отдельную функцию и переделать в if return
@@ -224,7 +231,8 @@ func handleConnections(w http.ResponseWriter, r *http.Request) {
 
 	cookie, err := r.Cookie("user_id")
 	if err != nil {
-		log.Fatal("Ошибка получения куки")
+		log.Printf("Ошибка получения куки")
+		return
 		// TODO: добавить переадресацию на страницу регистрации?
 	}
 
@@ -232,14 +240,19 @@ func handleConnections(w http.ResponseWriter, r *http.Request) {
 
 	username := usernames[user_id]
 
-	user := User{
-		Uid:       user_id,
-		Username:  username,
-		Websocket: ws,
-	}
+	// user := User{
+	// 	Uid:       user_id,
+	// 	Username:  username,
+	// 	Websocket: ws,
+	// }
 	// new_clinet_id++
 	// Регистрируем нового клиента
-	clients[ws] = user
+	// clients[user.Uid] = user
+
+	user := clients[user_id]
+	user.Websocket = ws
+	clients[user_id] = user
+
 	websockets[user.Uid] = ws
 
 	event := Event{
@@ -251,7 +264,12 @@ func handleConnections(w http.ResponseWriter, r *http.Request) {
 	log.Print(username)
 	log.Printf(" с uid=%d\n", user.Uid)
 
-	addUserToChat(0, user.Uid, false)
+	// addUserToChat(0, user.Uid, false, true)
+	log.Printf("У пользователя %d обнаружено %d чатов\n", user_id, len(clients[user_id].Chat_ids))
+	for chat_id := range clients[user_id].Chat_ids {
+		log.Printf("У пользователя %d обнаружен чат %d\n", user_id, chat_id)
+		addUserToChat(chat_id, user.Uid, chats[chat_id].User_infos[user_id].Is_admin, false)
+	}
 
 	for {
 		var event Event
@@ -260,7 +278,7 @@ func handleConnections(w http.ResponseWriter, r *http.Request) {
 		err := ws.ReadJSON(&event)
 		if err != nil {
 			log.Printf("Ошибка чтения события: %v", err)
-			delete(clients, ws)
+			delete(websockets, user.Uid)
 			break
 		}
 		// Передаём событие горутине
@@ -281,16 +299,16 @@ func handleEvents() {
 				log.Printf("Ошибка чтения сообщения: %v", err)
 			}
 
-			if chats[msg.Chat_id].User_wss[websockets[msg.Sender.Uid]].Is_muted {
+			if chats[msg.Chat_id].User_infos[msg.Sender.Uid].Is_muted {
 				continue
 			}
-
-			chat := &chats[msg.Chat_id]
-			chat.Messages = append(chat.Messages, msg)
 
 			msg.Sender.Username = usernames[msg.Sender.Uid]
 			data, _ := json.Marshal(msg)
 			event.Data = string(data)
+
+			chat := &chats[msg.Chat_id]
+			chat.Messages = append(chat.Messages, msg)
 
 			log.Printf("Сообщение от %s в чате с ID %d: %s\n", msg.Sender.Username, msg.Chat_id, msg.Message)
 
@@ -306,24 +324,9 @@ func handleEvents() {
 					log.Fatal(err)
 				}
 				event.Data = string(data)
-				for user_ws := range chat.User_wss {
-					err := user_ws.WriteJSON(event)
-					if err != nil {
-						log.Printf("Ошибка записи: %v", err)
-						user_ws.Close()
-						delete(clients, user_ws)
-					}
-				}
-			} else {
-				for user_ws := range chat.User_wss {
-					err := user_ws.WriteJSON(event)
-					if err != nil {
-						log.Printf("Ошибка записи: %v", err)
-						user_ws.Close()
-						delete(clients, user_ws)
-					}
-				}
 			}
+
+			NotifyChat(msg.Chat_id, event)
 
 		case INVITATION:
 			var invitation Invitation
@@ -339,15 +342,15 @@ func handleEvents() {
 				is_new_chat = true
 				new_chat_id = len(chats)
 				chats = append(chats, Chat{
-					Chat_id:  new_chat_id,
-					User_wss: make(map[*websocket.Conn]ChatUserInfo),
+					Chat_id:    new_chat_id,
+					User_infos: make(map[int]ChatUserInfo),
 				})
 			}
 
 			if is_new_chat {
-				addUserToChat(new_chat_id, event.Sender_uid, true)
+				addUserToChat(new_chat_id, event.Sender_uid, true, true)
 			}
-			addUserToChat(new_chat_id, invitation.User_id, false)
+			addUserToChat(new_chat_id, invitation.User_id, false, true)
 
 		case FILE:
 			data, err := os.ReadFile("attachments/" + event.Data)
@@ -379,42 +382,37 @@ func handleEvents() {
 				log.Fatal(err)
 			}
 
-			if !chats[data.Chat_id].User_wss[websockets[event.Sender_uid]].Is_admin {
+			if !chats[data.Chat_id].User_infos[event.Sender_uid].Is_admin {
 				continue
 			}
 
-			for user_ws := range chats[data.Chat_id].User_wss {
-				err := user_ws.WriteJSON(event)
-				if err != nil {
-					log.Printf("Ошибка записи: %v", err)
-					user_ws.Close()
-					delete(clients, user_ws)
-				}
-			}
+			NotifyChat(data.Chat_id, event)
 
 			if data.Is_admin {
-				chat_user_info := chats[data.Chat_id].User_wss[websockets[data.User_id]]
+				chat_user_info := chats[data.Chat_id].User_infos[data.User_id]
 				chat_user_info.Is_admin = !chat_user_info.Is_admin
-				chats[data.Chat_id].User_wss[websockets[data.User_id]] = chat_user_info
-				// log.Printf("Is_admin: %b", chats[data.Chat_id].User_wss[websockets[data.User_id]].Is_admin)
+				chats[data.Chat_id].User_infos[data.User_id] = chat_user_info
+				// log.Printf("Is_admin: %b", chats[data.Chat_id].User_wss[data.User_id].Is_admin)
 			}
 			if data.Is_muted {
-				chat_user_info := chats[data.Chat_id].User_wss[websockets[data.User_id]]
+				chat_user_info := chats[data.Chat_id].User_infos[data.User_id]
 				chat_user_info.Is_muted = !chat_user_info.Is_muted
-				chats[data.Chat_id].User_wss[websockets[data.User_id]] = chat_user_info
-				// log.Printf("Is_muted: %b", chats[data.Chat_id].User_wss[websockets[data.User_id]].Is_muted)
+				chats[data.Chat_id].User_infos[data.User_id] = chat_user_info
+				// log.Printf("Is_muted: %b", chats[data.Chat_id].User_wss[data.User_id].Is_muted)
 			}
 			if data.Is_kicked {
-				delete(chats[data.Chat_id].User_wss, websockets[data.User_id])
+				delete(chats[data.Chat_id].User_infos, data.User_id)
 			}
 		}
 	}
 }
 
-func addUserToChat(chat_id int, user_id int, is_admin bool) {
-	chats[chat_id].User_wss[websockets[user_id]] = ChatUserInfo{
-		Is_admin: is_admin,
-		Is_muted: false,
+func addUserToChat(chat_id int, user_id int, is_admin bool, do_notify_others bool) {
+	if _, is_in_chat := chats[chat_id].User_infos[user_id]; !is_in_chat {
+		chats[chat_id].User_infos[user_id] = ChatUserInfo{
+			Is_admin: is_admin,
+			Is_muted: false,
+		}
 	}
 
 	response := Event{
@@ -439,7 +437,7 @@ func addUserToChat(chat_id int, user_id int, is_admin bool) {
 	addition := Addition{
 		Chat_id:  chat_id,
 		User_id:  user_id,
-		Username: clients[websockets[user_id]].Username, // TODO: create new map
+		Username: clients[user_id].Username,
 		Is_admin: is_admin,
 	}
 
@@ -453,17 +451,19 @@ func addUserToChat(chat_id int, user_id int, is_admin bool) {
 		Data:       string(data),
 	}
 
-	for user_ws := range chats[chat_id].User_wss {
-		user_ws.WriteJSON(response)
-
-		if user_ws == websockets[user_id] {
-			continue
+	for other_user_id := range chats[chat_id].User_infos {
+		if do_notify_others && other_user_id != user_id {
+			other_user_ws, is_online := websockets[other_user_id]
+			if is_online {
+				other_user_ws.WriteJSON(response)
+			}
 		}
+
 		addition2 := Addition{
 			Chat_id:  chat_id,
-			User_id:  clients[user_ws].Uid,
-			Username: clients[user_ws].Username,                 // TODO: create new map
-			Is_admin: chats[chat_id].User_wss[user_ws].Is_admin, // FIXME
+			User_id:  clients[other_user_id].Uid,
+			Username: clients[other_user_id].Username,                   // TODO: create new map
+			Is_admin: chats[chat_id].User_infos[other_user_id].Is_admin, // FIXME
 		}
 
 		data, err := json.Marshal(addition2)
@@ -477,5 +477,24 @@ func addUserToChat(chat_id int, user_id int, is_admin bool) {
 		}
 
 		websockets[user_id].WriteJSON(response2)
+	}
+
+	clients[user_id].Chat_ids[chat_id] = true
+	log.Printf("Пользователь %d добавлен в чат %d\n", user_id, chat_id)
+
+}
+
+func NotifyChat(chat_id int, event Event) {
+	for user_id := range chats[chat_id].User_infos {
+		user_ws, is_online := websockets[user_id]
+		if is_online {
+			err := user_ws.WriteJSON(event)
+			if err != nil {
+				log.Printf("Ошибка записи: %v", err)
+				// Зачем удалять пользователя?
+				user_ws.Close()
+				delete(websockets, user_id)
+			}
+		}
 	}
 }
