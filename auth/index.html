@@ -1,0 +1,71 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <title>Go WebSocket Chat</title>
+</head>
+<body>
+
+    Войдите в аккаунт:
+    <input type="text" id="username" placeholder="ID" style="width: 150px;">
+    <input type="text" id= "password" placeholder="Пароль">
+    <button id="login_button" onclick="login()">Войти</button>
+    <button id="login_button" onclick="register()">Зарегистрироваться</button>
+    <div id="result"></div>
+
+    <script>
+        usernameElement = document.getElementById('username');
+        passwordElement = document.getElementById('password');
+
+        function login() {
+            username = usernameElement.value;
+            password = passwordElement.value;
+
+            fetch("http://localhost:8080/auth", {
+                method: "post",
+                body: JSON.stringify({
+                    username: username,
+                    password: password,
+                    is_registrating: false
+                })
+            })
+            .then((response) => response.text())
+            .then((text) => {
+                response = JSON.parse(text)
+                document.getElementById("result").innerText = response.text;
+
+                if (response.is_successful) {
+                    window.location.href = "http://localhost:8080/chat"
+                }
+            });
+            // }).then((response) => {
+            //     alert(response.text());
+            //     document.getElementById("result").innerText = JSON.parse(response.text()).response;
+            // });
+        }
+
+        function register() {
+            username = usernameElement.value;
+            password = passwordElement.value;
+
+            fetch("http://localhost:8080/auth", {
+                method: "post",
+                body: JSON.stringify({
+                    username: username,
+                    password: password,
+                    is_registrating: true
+                })
+            })
+            .then((response) => response.text())
+            .then((text) => {
+                response = JSON.parse(text)
+                document.getElementById("result").innerText = response.text;
+
+                if (response.is_successful) {
+                    window.location.href = "http://localhost:8080/chat"
+                }
+            });
+        }
+    </script>
+</body>
+</html>
+

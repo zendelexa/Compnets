@@ -2,11 +2,11 @@ package main
 
 import (
 	"encoding/json"
+	"fmt"
 	"log"
 	"net/http"
 	"os"
 	"strconv"
-	"strings"
 
 	"github.com/gorilla/websocket"
 )
@@ -26,6 +26,16 @@ var clients = make(map[*websocket.Conn]User)
 var websockets = make(map[int]*websocket.Conn)
 var events = make(chan Event)
 var chats []Chat
+var usernames = make(map[int]string)
+var user_ids = make(map[string]int) // TODO: избавиться,
+// чтобы была возможность делать пользователей с одинаковыми именами
+var passwords = make(map[int]string)
+
+type Authentification struct {
+	Username        string `json:"username"`
+	Password        string `json:"password"`
+	Is_registrating bool   `json:"is_registrating"`
+}
 
 // Настройки апгрейда WebSocket
 var upgrader = websocket.Upgrader{
@@ -101,11 +111,20 @@ func main() {
 	})
 
 	// Статические файлы (наш HTML/JS клиент)
-	fs := http.FileServer(http.Dir("./static"))
-	http.Handle("/", fs)
+	// fs := http.FileServer(http.Dir("./static"))
+	// http.Handle("/", fs)
+
+	http.HandleFunc("/auth", handleAuth)
 
 	// WebSocket endpoint
 	http.HandleFunc("/ws/", handleConnections)
+
+	// TODO: переделать папки так, чтобы был только один общий FileServer
+	chat_fs := http.FileServer(http.Dir("./static"))
+	http.Handle("/chat", http.StripPrefix("/chat", chat_fs))
+
+	fs := http.FileServer(http.Dir("./auth"))
+	http.Handle("/", fs)
 
 	// Запускаем горутину для обработки сообщений
 	go handleEvents()
@@ -118,7 +137,82 @@ func main() {
 	}
 }
 
-var new_clinet_id int = 0
+type AuthResponse struct {
+	Is_successful bool   `json:"is_successful"`
+	Text          string `json:"text"`
+}
+
+func handleAuth(w http.ResponseWriter, r *http.Request) {
+	switch r.Method {
+	case http.MethodPost:
+		var auth_data Authentification
+		json.NewDecoder(r.Body).Decode(&auth_data)
+
+		fmt.Printf("Auth attempt %s %s\n", auth_data.Username, auth_data.Password)
+
+		is_ok := false
+
+		user_id := -1
+		if auth_data.Is_registrating {
+			user_id = len(usernames)
+			usernames[user_id] = auth_data.Username
+			user_ids[auth_data.Username] = user_id
+			passwords[user_id] = auth_data.Password
+			is_ok = true
+		} else {
+			// TODO: вынести в отдельную функцию и переделать в if return
+			var is_registered bool
+			user_id, is_registered = user_ids[auth_data.Username]
+			if is_registered {
+				if auth_data.Password == passwords[user_id] {
+					is_ok = true
+
+				}
+			}
+		}
+
+		if is_ok {
+			fmt.Print("Auth completed\n")
+			// page_data, err := os.ReadFile("./static/index.html")
+			// if err != nil {
+			// 	log.Fatal(err)
+			// }
+
+			// w.Header().Set("Content-Type", "text/html")
+			// fmt.Fprint(w, string(page_data))
+
+			http.SetCookie(w, &http.Cookie{
+				Name:     "user_id",
+				Value:    strconv.Itoa(user_id),
+				Path:     "/",
+				HttpOnly: true,
+			})
+
+			response := AuthResponse{
+				Is_successful: true,
+				Text:          "Auth successful",
+			}
+			data, err := json.Marshal(response)
+			if err != nil {
+				log.Fatal(err)
+			}
+			w.Write(data)
+		} else {
+			fmt.Print("Auth failed\n")
+			response := AuthResponse{
+				Is_successful: false,
+				Text:          "Auth failed",
+			}
+			data, err := json.Marshal(response)
+			if err != nil {
+				log.Fatal(err)
+			}
+			w.Write(data)
+		}
+	}
+}
+
+// var new_clinet_id int = 0
 
 func handleConnections(w http.ResponseWriter, r *http.Request) {
 	// Апгрейд HTTP соединения до WebSocket
@@ -128,14 +222,22 @@ func handleConnections(w http.ResponseWriter, r *http.Request) {
 	}
 	defer ws.Close()
 
-	username := strings.TrimPrefix(r.URL.Path, "/ws/")
+	cookie, err := r.Cookie("user_id")
+	if err != nil {
+		log.Fatal("Ошибка получения куки")
+		// TODO: добавить переадресацию на страницу регистрации?
+	}
+
+	user_id, _ := strconv.Atoi(cookie.Value)
+
+	username := usernames[user_id]
 
 	user := User{
-		Uid:       new_clinet_id,
+		Uid:       user_id,
 		Username:  username,
 		Websocket: ws,
 	}
-	new_clinet_id++
+	// new_clinet_id++
 	// Регистрируем нового клиента
 	clients[ws] = user
 	websockets[user.Uid] = ws
@@ -185,6 +287,12 @@ func handleEvents() {
 
 			chat := &chats[msg.Chat_id]
 			chat.Messages = append(chat.Messages, msg)
+
+			msg.Sender.Username = usernames[msg.Sender.Uid]
+			data, _ := json.Marshal(msg)
+			event.Data = string(data)
+
+			log.Printf("Сообщение от %s в чате с ID %d: %s\n", msg.Sender.Username, msg.Chat_id, msg.Message)
 
 			if msg.Filename != "" {
 				err = os.WriteFile("attachments/"+msg.Filename, []byte(msg.Message), 0644)

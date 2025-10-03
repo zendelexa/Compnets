@@ -35,14 +35,15 @@
         const chats = document.getElementById('chats');
         // const messageInput = document.getElementById('message');
 
-        var my_username = prompt("Введите своё имя:", "Гость");
+        // var my_username = prompt("Введите своё имя:", "Гость");
+        var my_username = ""; // TODO: убрать вообще? лучше передавать его вместе с my_uid
         var my_uid = -1;
 
         addChat(-1, false);
 
         
         // Подключаемся к WebSocket серверу
-        const ws = new WebSocket('ws://localhost:8080/ws/' + my_username);
+        const ws = new WebSocket('ws://localhost:8080/ws/');
         
         ws.onopen = function() {
             addMessage(-1, 'Система', 'Подключено к серверу');
