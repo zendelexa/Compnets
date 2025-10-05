@@ -6,6 +6,7 @@
         body { font-family: Arial, sans-serif; max-width: 600px; margin: 0 auto; padding: 20px; }
         .chat { border: 1px solid #ccc; height: 100px; overflow-y: scroll; padding: 10px; margin-bottom: 3px; margin-top: 15px; }
         .users { border: 1px solid #ccc; height: 100px; overflow-y: scroll; padding: 10px; margin-bottom: 3px; margin-top: 15px; }
+        .versions { border: 1px solid #ccc; height: 100px; overflow-y: scroll; padding: 10px; margin-bottom: 3px; margin-top: 15px; }
         .message { margin-bottom: 10px; }
         .username { font-weight: bold; color: #3366cc; }
         .time { color: #999; font-size: 0.8em; }
@@ -26,6 +27,13 @@
     <div id="my_uid"></div>
 
     <textarea id="coedit"></textarea>
+    <div>
+        <input type="text" id="coedit_version_name" placeholder="Название версии" style="width: 150px;">
+        <button onclick="saveCoedit()">
+            Сохранить версию
+        </button>
+        <div id="coedit_versions" class="versions"></div>
+    </div>
 
     <div id="chats">
     </div>
@@ -149,8 +157,30 @@
             else if (event.event_type == "sync_coedit") {
                 data = JSON.parse(event.data);
                 if (coedit_info.id == data.coedit_id) {
-                    coedit.value = data.content;
-                    coedit_info.version = data.version;
+                    coedit.value = data.version.content;
+                    coedit_info.version = data.version.version;
+                    coedit_versions_element = document.getElementById("coedit_versions");
+                    coedit_versions_element.innerHTML = "";
+                    for (const version of data.versions) {
+                        version_element = document.createElement("div");
+                        version_element.innerText = version.number + ", " + version.name + ": ";
+                        revert_element = document.createElement("button");
+                        revert_element.innerText = "Загрузить";
+                        revert_element.onclick = () => {
+                            ws.send(JSON.stringify({
+                                event_type: "revert_coedit",
+                                sender: my_uid,
+                                data: JSON.stringify({
+                                    coedit_id: data.coedit_id,
+                                    version: version.number,
+                                })
+                            }));
+                        };
+                        version_element.appendChild(revert_element);
+
+                        coedit_versions_element.appendChild(version_element);
+                        coedit_versions_element.scrollTop = coedit_versions_element.scrollHeight;
+                    }
                 }
             }
         };
@@ -442,6 +472,24 @@
                 sendAddChat();
             }
         });
+
+        function saveCoedit() {
+            nameElement = document.getElementById("coedit_version_name");
+            name = nameElement.value;
+            nameElement.value = "";
+            if (name == "") {
+                name = "Unnamed save";
+            }
+
+            ws.send(JSON.stringify({
+                event_type: "save_coedit",
+                sender: my_uid,
+                data: JSON.stringify({
+                    coedit_id: coedit_info.id,
+                    name: name,
+                })
+            }))
+        }
     </script>
 </body>
 </html>

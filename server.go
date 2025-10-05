@@ -102,16 +102,22 @@ type Addition struct {
 	Is_admin bool   `json:"is_admin"`
 }
 
-type CoeditVersion struct {
+type VersionWithContent struct {
 	Version int    `json:"version"`
 	Content string `json:"content"`
 }
 
+type CoeditVersion struct {
+	Number int    `json:"number"`
+	Name   string `json:"name"`
+}
+
 type Coedit struct {
-	Chat_id       int             `json:"chat_id"`
-	Coedit_id     int             `json:"coedit_id"`
-	Versions      []CoeditVersion `json:"-"`
-	ActualVersion CoeditVersion   `json:"version"`
+	Chat_id               int                  `json:"chat_id"`
+	Coedit_id             int                  `json:"coedit_id"`
+	Versions_with_content []VersionWithContent `json:"-"`
+	Versions              []CoeditVersion      `json:"versions"`
+	ActualVersion         VersionWithContent   `json:"version"`
 }
 
 type AddCoedit struct {
@@ -122,20 +128,49 @@ type AddCoedit struct {
 
 type SyncCoedit struct {
 	Coedit_id int `json:"coedit_id"`
-	CoeditVersion
+	VersionWithContent
 }
 
 func newCoedit(chat_id int) Coedit {
 	result := Coedit{
 		Chat_id:   chat_id,
 		Coedit_id: len(coedits),
-		ActualVersion: CoeditVersion{
+		ActualVersion: VersionWithContent{
 			Version: 0,
 			Content: "",
 		},
 	}
-	result.Versions = append(result.Versions, result.ActualVersion)
+	result.Versions_with_content = append(result.Versions_with_content, result.ActualVersion)
+	result.Versions = append(result.Versions, CoeditVersion{
+		Number: 0,
+		Name:   "Initial version",
+	})
+	result.ActualVersion.Version = 1
 	return result
+}
+
+func (coedit *Coedit) makeSave(name string) {
+	coedit.Versions_with_content = append(coedit.Versions_with_content, coedit.ActualVersion)
+	coedit.Versions = append(coedit.Versions, CoeditVersion{
+		Number: coedit.ActualVersion.Version,
+		Name:   name,
+	})
+	log.Printf("Создана версия %d: \"%s\"", coedit.ActualVersion.Version, coedit.ActualVersion.Content)
+	coedit.ActualVersion.Version++
+}
+
+func (coedit *Coedit) revert(version int) {
+	coedit.ActualVersion = coedit.Versions_with_content[version]
+}
+
+type SaveCoedit struct {
+	Coedit_id int    `json:"coedit_id"`
+	Name      string `json:"name"`
+}
+
+type RevertCoedit struct {
+	Coedit_id int `json:"coedit_id"`
+	Version   int `json:"version"`
 }
 
 const (
@@ -148,6 +183,8 @@ const (
 	TOGGLE_USER_INFO = "toggle_user_info"
 	ADD_COEDIT       = "add_coedit"
 	SYNC_COEDIT      = "sync_coedit"
+	SAVE_COEDIT      = "save_coedit"
+	REVERT_COEDIT    = "revert_coedit"
 )
 
 func main() {
@@ -381,6 +418,10 @@ func handleEvents() {
 				return
 			}
 
+			if invitation.User_id == event.Sender_uid {
+				continue
+			}
+
 			new_chat_id := invitation.Chat_id
 			is_new_chat := false
 			if new_chat_id == -1 {
@@ -497,28 +538,39 @@ func handleEvents() {
 				log.Printf("Ошибка чтения при попытке синхронизации коэдита")
 			}
 
+			if data.Coedit_id == -1 {
+				continue
+			}
+
 			if data.Version == -1 {
-				sync_coedit := SyncCoedit{
-					Coedit_id:     data.Coedit_id,
-					CoeditVersion: coedits[data.Coedit_id].ActualVersion,
-				}
-
-				response_data, err := json.Marshal(sync_coedit)
-				if err != nil {
-					log.Printf("Ошибка при сборе доанных о коэдите")
-				}
-
-				response := Event{
-					Event_type: SYNC_COEDIT,
-					Sender_uid: -1,
-					Data:       string(response_data),
-				}
-
-				NotifyUser(event.Sender_uid, response)
+				NotifyUser(event.Sender_uid, WrapCoeditInEvent(data.Coedit_id))
 			} else {
 				coedits[data.Coedit_id].ActualVersion.Content = data.Content
-				NotifyChat(coedits[data.Coedit_id].Chat_id, event)
+
+				NotifyChat(coedits[data.Coedit_id].Chat_id, WrapCoeditInEvent(data.Coedit_id))
 			}
+		case SAVE_COEDIT:
+			var data SaveCoedit
+			err := json.Unmarshal([]byte(event.Data), &data)
+			if err != nil {
+				log.Printf("Ошибка чтения при попытке сохранения коэдита")
+			}
+
+			coedits[data.Coedit_id].makeSave(data.Name)
+
+			NotifyChat(coedits[data.Coedit_id].Chat_id, WrapCoeditInEvent(data.Coedit_id))
+		case REVERT_COEDIT:
+			var data RevertCoedit
+			err := json.Unmarshal([]byte(event.Data), &data)
+			if err != nil {
+				log.Printf("Ошибка чтения при попытке возврата коэдита")
+			}
+
+			log.Printf("ПОПЫТКА возврата к %d", data.Version)
+			coedits[data.Coedit_id].revert(data.Version)
+			log.Printf("возврат к %d", coedits[data.Coedit_id].ActualVersion.Version)
+
+			NotifyChat(coedits[data.Coedit_id].Chat_id, WrapCoeditInEvent(data.Coedit_id))
 		}
 	}
 }
@@ -616,5 +668,18 @@ func NotifyUser(user_id int, event Event) {
 			user_ws.Close()
 			delete(websockets, user_id)
 		}
+	}
+}
+
+func WrapCoeditInEvent(coedit_id int) Event {
+	response_data, err := json.Marshal(coedits[coedit_id])
+	if err != nil {
+		log.Printf("Ошибка при сборе данных о коэдите")
+	}
+
+	return Event{
+		Event_type: SYNC_COEDIT,
+		Sender_uid: -1,
+		Data:       string(response_data),
 	}
 }
