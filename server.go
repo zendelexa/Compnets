@@ -31,6 +31,7 @@ var usernames = make(map[int]string)
 var user_ids = make(map[string]int) // TODO: избавиться,
 // чтобы была возможность делать пользователей с одинаковыми именами
 var passwords = make(map[int]string)
+var coedits []Coedit
 
 type Authentification struct {
 	Username        string `json:"username"`
@@ -45,12 +46,18 @@ var upgrader = websocket.Upgrader{
 	},
 }
 
+type CoeditInfo struct {
+	Is_coedit bool `json:"is_coedit"`
+	Coedit_id int  `json:"coedit_id"`
+}
+
 // Структура для сообщений
 type Message struct {
-	Sender   User   `json:"sender"`
-	Message  string `json:"message"`
-	Chat_id  int    `json:"chat_id"`
-	Filename string `json:"filename"`
+	Sender      User       `json:"sender"`
+	Message     string     `json:"message"`
+	Chat_id     int        `json:"chat_id"`
+	Filename    string     `json:"filename"`
+	Coedit_info CoeditInfo `json:"coedit_info"`
 }
 
 type File struct {
@@ -95,6 +102,42 @@ type Addition struct {
 	Is_admin bool   `json:"is_admin"`
 }
 
+type CoeditVersion struct {
+	Version int    `json:"version"`
+	Content string `json:"content"`
+}
+
+type Coedit struct {
+	Chat_id       int             `json:"chat_id"`
+	Coedit_id     int             `json:"coedit_id"`
+	Versions      []CoeditVersion `json:"-"`
+	ActualVersion CoeditVersion   `json:"version"`
+}
+
+type AddCoedit struct {
+	Username  string `json:"username"`
+	Chat_id   int    `json:"chat_id"`
+	Coedit_id int    `json:"coedit_id"`
+}
+
+type SyncCoedit struct {
+	Coedit_id int `json:"coedit_id"`
+	CoeditVersion
+}
+
+func newCoedit(chat_id int) Coedit {
+	result := Coedit{
+		Chat_id:   chat_id,
+		Coedit_id: len(coedits),
+		ActualVersion: CoeditVersion{
+			Version: 0,
+			Content: "",
+		},
+	}
+	result.Versions = append(result.Versions, result.ActualVersion)
+	return result
+}
+
 const (
 	NEW_MESSAGE      = "message"
 	INVITATION       = "invitation"
@@ -103,6 +146,8 @@ const (
 	FILE             = "file"
 	ADDITION         = "addition"
 	TOGGLE_USER_INFO = "toggle_user_info"
+	ADD_COEDIT       = "add_coedit"
+	SYNC_COEDIT      = "sync_coedit"
 )
 
 func main() {
@@ -403,6 +448,77 @@ func handleEvents() {
 			if data.Is_kicked {
 				delete(chats[data.Chat_id].User_infos, data.User_id)
 			}
+		case ADD_COEDIT:
+			var data struct {
+				Chat_id int `json:"chat_id"`
+			}
+			err := json.Unmarshal([]byte(event.Data), &data)
+			if err != nil {
+				log.Printf("Ошибка чтения добавления коэдита: %v", err)
+			}
+
+			coedits = append(coedits, newCoedit(data.Chat_id))
+
+			msg := Message{
+				Sender:  clients[event.Sender_uid],
+				Chat_id: data.Chat_id,
+				Coedit_info: CoeditInfo{
+					Is_coedit: true,
+					Coedit_id: coedits[len(coedits)-1].Coedit_id,
+				},
+				Message:  "",
+				Filename: "",
+			}
+
+			response_data, err := json.Marshal(msg)
+
+			if err != nil {
+				log.Printf("Ошибка создания коэдита")
+			}
+
+			response := Event{
+				Event_type: NEW_MESSAGE,
+				Sender_uid: event.Sender_uid,
+				Data:       string(response_data),
+			}
+
+			chat := &chats[msg.Chat_id]
+			chat.Messages = append(chat.Messages, msg)
+
+			NotifyChat(data.Chat_id, response)
+
+			log.Printf("В чате %d создан коэдит %d пользователем %d", data.Chat_id, msg.Coedit_info.Coedit_id, event.Sender_uid)
+		case SYNC_COEDIT:
+			log.Print("Attempt to sync")
+
+			var data SyncCoedit
+			err := json.Unmarshal([]byte(event.Data), &data)
+			if err != nil {
+				log.Printf("Ошибка чтения при попытке синхронизации коэдита")
+			}
+
+			if data.Version == -1 {
+				sync_coedit := SyncCoedit{
+					Coedit_id:     data.Coedit_id,
+					CoeditVersion: coedits[data.Coedit_id].ActualVersion,
+				}
+
+				response_data, err := json.Marshal(sync_coedit)
+				if err != nil {
+					log.Printf("Ошибка при сборе доанных о коэдите")
+				}
+
+				response := Event{
+					Event_type: SYNC_COEDIT,
+					Sender_uid: -1,
+					Data:       string(response_data),
+				}
+
+				NotifyUser(event.Sender_uid, response)
+			} else {
+				coedits[data.Coedit_id].ActualVersion.Content = data.Content
+				NotifyChat(coedits[data.Coedit_id].Chat_id, event)
+			}
 		}
 	}
 }
@@ -486,15 +602,19 @@ func addUserToChat(chat_id int, user_id int, is_admin bool, do_notify_others boo
 
 func NotifyChat(chat_id int, event Event) {
 	for user_id := range chats[chat_id].User_infos {
-		user_ws, is_online := websockets[user_id]
-		if is_online {
-			err := user_ws.WriteJSON(event)
-			if err != nil {
-				log.Printf("Ошибка записи: %v", err)
-				// Зачем удалять пользователя?
-				user_ws.Close()
-				delete(websockets, user_id)
-			}
+		NotifyUser(user_id, event)
+	}
+}
+
+func NotifyUser(user_id int, event Event) {
+	user_ws, is_online := websockets[user_id]
+	if is_online {
+		err := user_ws.WriteJSON(event)
+		if err != nil {
+			log.Printf("Ошибка записи: %v", err)
+			// Зачем удалять пользователя?
+			user_ws.Close()
+			delete(websockets, user_id)
 		}
 	}
 }

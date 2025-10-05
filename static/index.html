@@ -25,6 +25,8 @@
     
     <div id="my_uid"></div>
 
+    <textarea id="coedit"></textarea>
+
     <div id="chats">
     </div>
 
@@ -44,6 +46,24 @@
         
         // Подключаемся к WebSocket серверу
         const ws = new WebSocket('ws://localhost:8080/ws/');
+
+        coedit_info = {
+            id: -1,
+            version: -1,
+        }
+        coedit = document.getElementById("coedit");
+        coedit.addEventListener("input", function(event) {
+            content = event.target.value;
+            ws.send(JSON.stringify({
+                event_type: "sync_coedit",
+                sender: my_uid,
+                data: JSON.stringify({
+                    coedit_id: coedit_info.id,
+                    version: coedit_info.version,
+                    content: content,
+                })
+            }));
+        });
         
         ws.onopen = function() {
             addMessage(-1, 'Система', 'Подключено к серверу');
@@ -59,7 +79,10 @@
             // Заменить на switch
             if (event.event_type == "message") {
                 const msg = JSON.parse(event.data);
-                if (msg.filename != "") {
+                if (msg.coedit_info.is_coedit) {
+                    addCoedit(msg.chat_id, msg.coedit_info.coedit_id, msg.sender.username)
+                }
+                else if (msg.filename != "") {
                     addFile(msg.chat_id, msg.sender.username, msg.filename);
                 }
                 else {
@@ -121,6 +144,13 @@
                     if (data.user_id == my_uid) {
                         chats.children[chats_map[data.chat_id]].innerHTML = "";
                     }
+                }
+            }
+            else if (event.event_type == "sync_coedit") {
+                data = JSON.parse(event.data);
+                if (coedit_info.id == data.coedit_id) {
+                    coedit.value = data.content;
+                    coedit_info.version = data.version;
                 }
             }
         };
@@ -231,6 +261,17 @@
                 chats.lastElementChild.children[chats.lastElementChild.children.length - 2]
             ); // Сомнительный момент
             chats.lastElementChild.appendChild(buttonElement);
+
+            const coeditElement = document.createElement('button');
+            coeditElement.innerText = 'Создать документ для совместного редактирования';
+            coeditElement.onclick = () => ws.send(JSON.stringify({
+                    event_type: "add_coedit",
+                    sender_uid: my_uid,
+                    data: JSON.stringify({
+                        chat_id: chat_id
+                    })
+                }));
+            chats.lastElementChild.appendChild(coeditElement);
         }
 
         function addUser(chat_id, user_id, username, is_admin) {
@@ -356,6 +397,32 @@
                     event_type: "file",
                     sender_uid: my_uid,
                     data: filename,
+                }));
+            }
+            messageElement.appendChild(buttonElement);
+            let chat = chats.children[chats_map[chat_id]].children[0];
+            chat.appendChild(messageElement);
+            chat.scrollTop = chat.scrollHeight;
+        }
+
+        function addCoedit(chat_id, coedit_id, username) {
+            const messageElement = document.createElement('div');
+            messageElement.className = 'message';
+            messageElement.innerHTML = `
+                <span class="username">${username}:</span>
+            `;
+            const buttonElement = document.createElement('button');
+            buttonElement.innerText = "Совместное редактирование";
+            buttonElement.onclick = () => {
+                coedit_info.id = coedit_id;
+                ws.send(JSON.stringify({
+                    event_type: "sync_coedit",
+                    sender_uid: my_uid,
+                    data: JSON.stringify({
+                        coedit_id: coedit_id,
+                        version: -1,
+                        content: "",
+                    }),
                 }));
             }
             messageElement.appendChild(buttonElement);
