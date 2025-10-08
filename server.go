@@ -66,8 +66,8 @@ type File struct {
 }
 
 type ChatUserInfo struct {
-	Is_admin bool `json:"is_admin"`
-	Is_muted bool `json:"is_muted"`
+	Rights_level int  `json:"rights_level"`
+	Is_muted     bool `json:"is_muted"`
 }
 
 type ToggleUserInfo struct {
@@ -96,10 +96,10 @@ type Invitation struct {
 }
 
 type Addition struct {
-	Chat_id  int    `json:"chat_id"`
-	User_id  int    `json:"user_id"`
-	Username string `json:"username"`
-	Is_admin bool   `json:"is_admin"`
+	Chat_id      int    `json:"chat_id"`
+	User_id      int    `json:"user_id"`
+	Username     string `json:"username"`
+	Rights_level int    `json:"rights_level"`
 }
 
 type VersionWithContent struct {
@@ -350,7 +350,7 @@ func handleConnections(w http.ResponseWriter, r *http.Request) {
 	log.Printf("У пользователя %d обнаружено %d чатов\n", user_id, len(clients[user_id].Chat_ids))
 	for chat_id := range clients[user_id].Chat_ids {
 		log.Printf("У пользователя %d обнаружен чат %d\n", user_id, chat_id)
-		addUserToChat(chat_id, user.Uid, chats[chat_id].User_infos[user_id].Is_admin, false)
+		addUserToChat(chat_id, user.Uid, chats[chat_id].User_infos[user_id].Rights_level, false)
 	}
 
 	for {
@@ -434,9 +434,9 @@ func handleEvents() {
 			}
 
 			if is_new_chat {
-				addUserToChat(new_chat_id, event.Sender_uid, true, true)
+				addUserToChat(new_chat_id, event.Sender_uid, 2, true)
 			}
-			addUserToChat(new_chat_id, invitation.User_id, false, true)
+			addUserToChat(new_chat_id, invitation.User_id, 0, true)
 
 		case FILE:
 			data, err := os.ReadFile("attachments/" + event.Data)
@@ -468,7 +468,11 @@ func handleEvents() {
 				log.Fatal(err)
 			}
 
-			if !chats[data.Chat_id].User_infos[event.Sender_uid].Is_admin {
+			if chats[data.Chat_id].User_infos[event.Sender_uid].Rights_level == 0 {
+				continue
+			}
+
+			if chats[data.Chat_id].User_infos[data.User_id].Rights_level == 2 && data.Is_admin {
 				continue
 			}
 
@@ -476,7 +480,7 @@ func handleEvents() {
 
 			if data.Is_admin {
 				chat_user_info := chats[data.Chat_id].User_infos[data.User_id]
-				chat_user_info.Is_admin = !chat_user_info.Is_admin
+				chat_user_info.Rights_level = 1 - chat_user_info.Rights_level
 				chats[data.Chat_id].User_infos[data.User_id] = chat_user_info
 				// log.Printf("Is_admin: %b", chats[data.Chat_id].User_wss[data.User_id].Is_admin)
 			}
@@ -575,11 +579,11 @@ func handleEvents() {
 	}
 }
 
-func addUserToChat(chat_id int, user_id int, is_admin bool, do_notify_others bool) {
+func addUserToChat(chat_id int, user_id int, rights_level int, do_notify_others bool) {
 	if _, is_in_chat := chats[chat_id].User_infos[user_id]; !is_in_chat {
 		chats[chat_id].User_infos[user_id] = ChatUserInfo{
-			Is_admin: is_admin,
-			Is_muted: false,
+			Rights_level: rights_level,
+			Is_muted:     false,
 		}
 	}
 
@@ -603,10 +607,10 @@ func addUserToChat(chat_id int, user_id int, is_admin bool, do_notify_others boo
 	}
 
 	addition := Addition{
-		Chat_id:  chat_id,
-		User_id:  user_id,
-		Username: clients[user_id].Username,
-		Is_admin: is_admin,
+		Chat_id:      chat_id,
+		User_id:      user_id,
+		Username:     clients[user_id].Username,
+		Rights_level: rights_level,
 	}
 
 	data, err := json.Marshal(addition)
@@ -628,10 +632,10 @@ func addUserToChat(chat_id int, user_id int, is_admin bool, do_notify_others boo
 		}
 
 		addition2 := Addition{
-			Chat_id:  chat_id,
-			User_id:  clients[other_user_id].Uid,
-			Username: clients[other_user_id].Username,                   // TODO: create new map
-			Is_admin: chats[chat_id].User_infos[other_user_id].Is_admin, // FIXME
+			Chat_id:      chat_id,
+			User_id:      clients[other_user_id].Uid,
+			Username:     clients[other_user_id].Username,                       // TODO: create new map
+			Rights_level: chats[chat_id].User_infos[other_user_id].Rights_level, // FIXME
 		}
 
 		data, err := json.Marshal(addition2)

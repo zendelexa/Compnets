@@ -114,17 +114,17 @@
             }
             else if (event.event_type == "addition") {
                 data = JSON.parse(event.data);
-                addUser(data.chat_id, data.user_id, data.username, data.is_admin);
+                addUser(data.chat_id, data.user_id, data.username, data.rights_level);
             }
             else if (event.event_type == "toggle_user_info") {
                 data = JSON.parse(event.data);
                 users_element = chats.children[chats_map[data.chat_id]].children[1];
 
                 if (data.is_admin) {
-                    is_admin_now = chats_users_map[data.chat_id][data.user_id].is_admin;
-                    chats_users_map[data.chat_id][data.user_id].is_admin = !is_admin_now;
+                    rights_level_now = chats_users_map[data.chat_id][data.user_id].rights_level;
+                    chats_users_map[data.chat_id][data.user_id].rights_level = 1 - rights_level_now;
                     
-                    if (is_admin_now) {
+                    if (rights_level_now == 1) {
                         users_element.children[chats_users_map[data.chat_id][data.user_id].position].children[0].innerText = "";
                     }
                     else {
@@ -304,10 +304,10 @@
             chats.lastElementChild.appendChild(coeditElement);
         }
 
-        function addUser(chat_id, user_id, username, is_admin) {
+        function addUser(chat_id, user_id, username, rights_level) {
             chats_users_map[chat_id][user_id] = {
                 "username": username,
-                "is_admin": is_admin,
+                "rights_level": rights_level,
                 "is_muted": false,
                 "position": Object.keys(chats_users_map[chat_id]).length,
             };
@@ -316,7 +316,8 @@
             userElement.innerText = "" + user_id + ": " + username;
 
             const isAdmin = document.createElement('div');
-            if (is_admin) isAdmin.innerText = '(Admin)';
+            if (rights_level == 1) isAdmin.innerText = '(Admin)';
+            else if (rights_level == 2) isAdmin.innerText = "(Group owner)";
             userElement.appendChild(isAdmin);
 
             const isMuted = document.createElement('div');
