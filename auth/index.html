@@ -5,11 +5,11 @@
 </head>
 <body>
 
-    Войдите в аккаунт:
-    <input type="text" id="username" placeholder="ID" style="width: 150px;">
-    <input type="text" id= "password" placeholder="Пароль">
-    <button id="login_button" onclick="login()">Войти</button>
-    <button id="login_button" onclick="register()">Зарегистрироваться</button>
+    Log in or sign up:
+    <input type="text" id="username" placeholder="Username" style="width: 150px;">
+    <input type="password" id= "password" placeholder="Password">
+    <button id="login_button" onclick="login()">Log in</button>
+    <button id="login_button" onclick="register()">Sign up</button>
     <div id="result"></div>
 
     <script>
@@ -37,10 +37,6 @@
                     window.location.href = "http://localhost:8080/chat"
                 }
             });
-            // }).then((response) => {
-            //     alert(response.text());
-            //     document.getElementById("result").innerText = JSON.parse(response.text()).response;
-            // });
         }
 
         function register() {

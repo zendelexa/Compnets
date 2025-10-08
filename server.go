@@ -155,7 +155,7 @@ func (coedit *Coedit) makeSave(name string) {
 		Number: coedit.ActualVersion.Version,
 		Name:   name,
 	})
-	log.Printf("Создана версия %d: \"%s\"", coedit.ActualVersion.Version, coedit.ActualVersion.Content)
+	log.Printf("Version created %d: \"%s\"", coedit.ActualVersion.Version, coedit.ActualVersion.Content)
 	coedit.ActualVersion.Version++
 }
 
@@ -192,10 +192,6 @@ func main() {
 		Chat_id:    0,
 		User_infos: make(map[int]ChatUserInfo),
 	})
-
-	// Статические файлы (наш HTML/JS клиент)
-	// fs := http.FileServer(http.Dir("./static"))
-	// http.Handle("/", fs)
 
 	http.HandleFunc("/auth", handleAuth)
 
@@ -262,13 +258,6 @@ func handleAuth(w http.ResponseWriter, r *http.Request) {
 
 		if is_ok {
 			fmt.Print("Auth completed\n")
-			// page_data, err := os.ReadFile("./static/index.html")
-			// if err != nil {
-			// 	log.Fatal(err)
-			// }
-
-			// w.Header().Set("Content-Type", "text/html")
-			// fmt.Fprint(w, string(page_data))
 
 			http.SetCookie(w, &http.Cookie{
 				Name:     "user_id",
@@ -301,8 +290,6 @@ func handleAuth(w http.ResponseWriter, r *http.Request) {
 	}
 }
 
-// var new_clinet_id int = 0
-
 func handleConnections(w http.ResponseWriter, r *http.Request) {
 	// Апгрейд HTTP соединения до WebSocket
 	ws, err := upgrader.Upgrade(w, r, nil)
@@ -322,15 +309,6 @@ func handleConnections(w http.ResponseWriter, r *http.Request) {
 
 	username := usernames[user_id]
 
-	// user := User{
-	// 	Uid:       user_id,
-	// 	Username:  username,
-	// 	Websocket: ws,
-	// }
-	// new_clinet_id++
-	// Регистрируем нового клиента
-	// clients[user.Uid] = user
-
 	user := clients[user_id]
 	user.Websocket = ws
 	clients[user_id] = user
@@ -346,7 +324,6 @@ func handleConnections(w http.ResponseWriter, r *http.Request) {
 	log.Print(username)
 	log.Printf(" с uid=%d\n", user.Uid)
 
-	// addUserToChat(0, user.Uid, false, true)
 	log.Printf("У пользователя %d обнаружено %d чатов\n", user_id, len(clients[user_id].Chat_ids))
 	for chat_id := range clients[user_id].Chat_ids {
 		log.Printf("У пользователя %d обнаружен чат %d\n", user_id, chat_id)
@@ -472,7 +449,7 @@ func handleEvents() {
 				continue
 			}
 
-			if chats[data.Chat_id].User_infos[data.User_id].Rights_level == 2 && data.Is_admin {
+			if chats[data.Chat_id].User_infos[data.User_id].Rights_level == 2 && chats[data.Chat_id].User_infos[event.Sender_uid].Rights_level != 2 {
 				continue
 			}
 
@@ -482,13 +459,11 @@ func handleEvents() {
 				chat_user_info := chats[data.Chat_id].User_infos[data.User_id]
 				chat_user_info.Rights_level = 1 - chat_user_info.Rights_level
 				chats[data.Chat_id].User_infos[data.User_id] = chat_user_info
-				// log.Printf("Is_admin: %b", chats[data.Chat_id].User_wss[data.User_id].Is_admin)
 			}
 			if data.Is_muted {
 				chat_user_info := chats[data.Chat_id].User_infos[data.User_id]
 				chat_user_info.Is_muted = !chat_user_info.Is_muted
 				chats[data.Chat_id].User_infos[data.User_id] = chat_user_info
-				// log.Printf("Is_muted: %b", chats[data.Chat_id].User_wss[data.User_id].Is_muted)
 			}
 			if data.Is_kicked {
 				delete(chats[data.Chat_id].User_infos, data.User_id)
@@ -634,8 +609,8 @@ func addUserToChat(chat_id int, user_id int, rights_level int, do_notify_others 
 		addition2 := Addition{
 			Chat_id:      chat_id,
 			User_id:      clients[other_user_id].Uid,
-			Username:     clients[other_user_id].Username,                       // TODO: create new map
-			Rights_level: chats[chat_id].User_infos[other_user_id].Rights_level, // FIXME
+			Username:     clients[other_user_id].Username,
+			Rights_level: chats[chat_id].User_infos[other_user_id].Rights_level,
 		}
 
 		data, err := json.Marshal(addition2)

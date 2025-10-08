@@ -12,15 +12,12 @@
         .time { color: #999; font-size: 0.8em; }
     </style>
 </head>
-<body>
-    <h1>WebSocket Chat на Go</h1>
-    
+<body>    
     <div style="border: 10px;">
-        Добавить человека в чат:
-        <input type="text" id="new_chat_id" placeholder="ID чата (оставьте пустым, чтобы создать новый чат)" style="width: 150px;">
-        <input type="text" id= "new_chat_uid" placeholder="ID человека">
-        <!-- <input type="file" -->
-        <button id="new_chat_button" onclick="sendAddChat()">Добавить</button>
+        Add user to a chat:
+        <input type="text" id="new_chat_id" placeholder="Chat ID (leave blank to create new chat)" style="width: 150px;">
+        <input type="text" id= "new_chat_uid" placeholder="User ID">
+        <button id="new_chat_button" onclick="sendAddChat()">Add</button>
     </div>
     
     
@@ -28,9 +25,9 @@
 
     <textarea id="coedit"></textarea>
     <div>
-        <input type="text" id="coedit_version_name" placeholder="Название версии" style="width: 150px;">
+        <input type="text" id="coedit_version_name" placeholder="Version name" style="width: 150px;">
         <button onclick="saveCoedit()">
-            Сохранить версию
+            Save version
         </button>
         <div id="coedit_versions" class="versions"></div>
     </div>
@@ -43,9 +40,7 @@
         chats_users_map = {};
 
         const chats = document.getElementById('chats');
-        // const messageInput = document.getElementById('message');
 
-        // var my_username = prompt("Введите своё имя:", "Гость");
         var my_username = ""; // TODO: убрать вообще? лучше передавать его вместе с my_uid
         var my_uid = -1;
 
@@ -74,16 +69,15 @@
         });
         
         ws.onopen = function() {
-            addMessage(-1, 'Система', 'Подключено к серверу');
+            addMessage(-1, 'System', 'Connected to server');
         };
         
         ws.onclose = function() {
-            addMessage(-1, 'Система', 'Соединение закрыто');
+            addMessage(-1, 'System', 'Disconnected from server');
         };
         
         ws.onmessage = function(event) {
             event = JSON.parse(event.data);
-            // alert(event.event_type + " " + event.data);
             // Заменить на switch
             if (event.event_type == "message") {
                 const msg = JSON.parse(event.data);
@@ -99,7 +93,7 @@
             }
             else if (event.event_type == "uid") {
                 my_uid = JSON.parse(event.data);
-                document.getElementById('my_uid').innerText = "Ваш ID: " + my_uid;
+                document.getElementById('my_uid').innerText = "Your user ID: " + my_uid;
             }
             else if (event.event_type == "invitation") {
                 const chat_id = parseInt(event.data);
@@ -165,7 +159,7 @@
                         version_element = document.createElement("div");
                         version_element.innerText = version.number + ", " + version.name + ": ";
                         revert_element = document.createElement("button");
-                        revert_element.innerText = "Загрузить";
+                        revert_element.innerText = "Revert here";
                         revert_element.onclick = () => {
                             ws.send(JSON.stringify({
                                 event_type: "revert_coedit",
@@ -187,7 +181,6 @@
         
         function sendMessage(chat_id, messageInput, fileInput) {
             const message = messageInput.value;
-            const flies = fileInput.flies;
             
             if (message) {
                 ws.send(JSON.stringify({
@@ -254,7 +247,7 @@
             chats.lastElementChild.appendChild(usersElement);
 
             const chatIdElement = document.createElement('div');
-            chatIdElement.innerText = "ID чата: " + chat_id;
+            chatIdElement.innerText = "Chat ID: " + chat_id;
             chats.lastElementChild.appendChild(chatIdElement);
 
             if (!can_send_messages) return;
@@ -262,9 +255,7 @@
             const inputElement = document.createElement('input');
             inputElement.type = 'text';
             inputElement.style ='width: 300px;';
-            inputElement.placeholder = 'Сообщение';
-            
-            
+            inputElement.placeholder = 'Message';
 
             const fileElement = document.createElement('input');
             fileElement.type = 'file';
@@ -286,14 +277,12 @@
             chats.lastElementChild.appendChild(fileElement);
 
             const buttonElement = document.createElement('button');
-            buttonElement.innerText = 'Отправить';
-            buttonElement.onclick = () => sendMessage(chat_id, chats.lastElementChild.lastElementChild,
-                chats.lastElementChild.children[chats.lastElementChild.children.length - 2]
-            ); // Сомнительный момент
+            buttonElement.innerText = 'Send';
+            buttonElement.onclick = () => sendMessage(chat_id, inputElement, fileElement); // Сомнительный момент
             chats.lastElementChild.appendChild(buttonElement);
 
             const coeditElement = document.createElement('button');
-            coeditElement.innerText = 'Создать документ для совместного редактирования';
+            coeditElement.innerText = 'Create a document for collaborative editing';
             coeditElement.onclick = () => ws.send(JSON.stringify({
                     event_type: "add_coedit",
                     sender_uid: my_uid,
@@ -443,7 +432,7 @@
                 <span class="username">${username}:</span>
             `;
             const buttonElement = document.createElement('button');
-            buttonElement.innerText = "Совместное редактирование";
+            buttonElement.innerText = "Collaborative editing";
             buttonElement.onclick = () => {
                 coedit_info.id = coedit_id;
                 ws.send(JSON.stringify({
