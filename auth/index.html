@@ -20,7 +20,7 @@
             username = usernameElement.value;
             password = passwordElement.value;
 
-            fetch("http://localhost:8080/auth", {
+            fetch("/auth", {
                 method: "post",
                 body: JSON.stringify({
                     username: username,
@@ -34,7 +34,7 @@
                 document.getElementById("result").innerText = response.text;
 
                 if (response.is_successful) {
-                    window.location.href = "http://localhost:8080/chat"
+                    window.location.href = "/chat"
                 }
             });
         }
@@ -43,7 +43,7 @@
             username = usernameElement.value;
             password = passwordElement.value;
 
-            fetch("http://localhost:8080/auth", {
+            fetch("/auth", {
                 method: "post",
                 body: JSON.stringify({
                     username: username,
@@ -57,7 +57,7 @@
                 document.getElementById("result").innerText = response.text;
 
                 if (response.is_successful) {
-                    window.location.href = "http://localhost:8080/chat"
+                    window.location.href = "/chat"
                 }
             });
         }

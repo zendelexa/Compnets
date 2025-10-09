@@ -187,11 +187,26 @@ const (
 	REVERT_COEDIT    = "revert_coedit"
 )
 
+type Config struct {
+	Port            string `json:"port"`
+	Max_connections int    `json:"max_connections"`
+}
+
+var semaphore chan struct{}
+
 func main() {
 	chats = append(chats, Chat{
 		Chat_id:    0,
 		User_infos: make(map[int]ChatUserInfo),
 	})
+
+	config_file, err := os.Open("config.json")
+	if err != nil {
+		log.Panic("Could not open the config file")
+	}
+	var config Config
+	json.NewDecoder(config_file).Decode(&config)
+	semaphore = make(chan struct{}, config.Max_connections)
 
 	http.HandleFunc("/auth", handleAuth)
 
@@ -209,8 +224,8 @@ func main() {
 	go handleEvents()
 
 	// Запускаем сервер
-	log.Println("Сервер запущен на :8080")
-	err := http.ListenAndServe(":8080", nil)
+	log.Printf("Сервер запущен на :%s\n", config.Port)
+	err = http.ListenAndServe(":"+config.Port, nil)
 	if err != nil {
 		log.Fatal("Ошибка сервера:", err)
 	}
@@ -291,61 +306,70 @@ func handleAuth(w http.ResponseWriter, r *http.Request) {
 }
 
 func handleConnections(w http.ResponseWriter, r *http.Request) {
-	// Апгрейд HTTP соединения до WebSocket
-	ws, err := upgrader.Upgrade(w, r, nil)
-	if err != nil {
-		log.Fatal(err)
-	}
-	defer ws.Close()
-
-	cookie, err := r.Cookie("user_id")
-	if err != nil {
-		log.Printf("Ошибка получения куки")
-		return
-		// TODO: добавить переадресацию на страницу регистрации?
-	}
-
-	user_id, _ := strconv.Atoi(cookie.Value)
-
-	username := usernames[user_id]
-
-	user := clients[user_id]
-	user.Websocket = ws
-	clients[user_id] = user
-
-	websockets[user.Uid] = ws
-
-	event := Event{
-		Event_type: GET_UID,
-		Data:       strconv.Itoa(user.Uid),
-	}
-	ws.WriteJSON(event)
-	log.Printf("Имя пользователя: ")
-	log.Print(username)
-	log.Printf(" с uid=%d\n", user.Uid)
-
-	log.Printf("У пользователя %d обнаружено %d чатов\n", user_id, len(clients[user_id].Chat_ids))
-	for chat_id := range clients[user_id].Chat_ids {
-		log.Printf("У пользователя %d обнаружен чат %d\n", user_id, chat_id)
-		addUserToChat(chat_id, user.Uid, chats[chat_id].User_infos[user_id].Rights_level, false)
-	}
-
-	for {
-		var event Event
-
-		// Читаем новое сообщение от клиента
-		err := ws.ReadJSON(&event)
+	select {
+	case semaphore <- struct{}{}:
+		// Апгрейд HTTP соединения до WebSocket
+		ws, err := upgrader.Upgrade(w, r, nil)
 		if err != nil {
-			log.Printf("Ошибка чтения события: %v", err)
-			delete(websockets, user.Uid)
-			break
+			log.Fatal(err)
 		}
-		// Передаём событие горутине
-		events <- event
+		defer ws.Close()
+
+		cookie, err := r.Cookie("user_id")
+		if err != nil {
+			log.Printf("Ошибка получения куки")
+			return
+			// TODO: добавить переадресацию на страницу регистрации?
+		}
+
+		user_id, _ := strconv.Atoi(cookie.Value)
+
+		username := usernames[user_id]
+
+		user := clients[user_id]
+		user.Websocket = ws
+		clients[user_id] = user
+
+		websockets[user.Uid] = ws
+
+		event := Event{
+			Event_type: GET_UID,
+			Data:       strconv.Itoa(user.Uid),
+		}
+		ws.WriteJSON(event)
+		log.Printf("Имя пользователя: ")
+		log.Print(username)
+		log.Printf(" с uid=%d\n", user.Uid)
+
+		log.Printf("У пользователя %d обнаружено %d чатов\n", user_id, len(clients[user_id].Chat_ids))
+		for chat_id := range clients[user_id].Chat_ids {
+			log.Printf("У пользователя %d обнаружен чат %d\n", user_id, chat_id)
+			addUserToChat(chat_id, user.Uid, chats[chat_id].User_infos[user_id].Rights_level, false)
+		}
+
+		for {
+			var event Event
+
+			// Читаем новое сообщение от клиента
+			err := ws.ReadJSON(&event)
+			if err != nil {
+				log.Printf("Ошибка чтения события: %v", err)
+				delete(websockets, user.Uid)
+				break
+			}
+			// Передаём событие горутине
+			events <- event
+		}
+	default:
+		http.Error(w, "Server busy", http.StatusServiceUnavailable)
 	}
 }
 
 func handleEvents() {
+	defer func() {
+		<-semaphore
+	}()
+
 	for {
 		event := <-events
 
