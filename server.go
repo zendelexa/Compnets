@@ -2,7 +2,6 @@ package main
 
 import (
 	"encoding/json"
-	"fmt"
 	"log"
 	"net/http"
 	"os"
@@ -242,7 +241,7 @@ func handleAuth(w http.ResponseWriter, r *http.Request) {
 		var auth_data Authentification
 		json.NewDecoder(r.Body).Decode(&auth_data)
 
-		fmt.Printf("Auth attempt %s %s\n", auth_data.Username, auth_data.Password)
+		log.Printf("Auth attempt %s %s\n", auth_data.Username, auth_data.Password)
 
 		is_ok := false
 
@@ -272,7 +271,7 @@ func handleAuth(w http.ResponseWriter, r *http.Request) {
 		}
 
 		if is_ok {
-			fmt.Print("Auth completed\n")
+			log.Print("Auth completed\n")
 
 			http.SetCookie(w, &http.Cookie{
 				Name:     "user_id",
@@ -291,7 +290,7 @@ func handleAuth(w http.ResponseWriter, r *http.Request) {
 			}
 			w.Write(data)
 		} else {
-			fmt.Print("Auth failed\n")
+			log.Print("Auth failed\n")
 			response := AuthResponse{
 				Is_successful: false,
 				Text:          "Auth failed",
@@ -317,7 +316,7 @@ func handleConnections(w http.ResponseWriter, r *http.Request) {
 
 		cookie, err := r.Cookie("user_id")
 		if err != nil {
-			log.Printf("Ошибка получения куки")
+			log.Printf("Could not retrieve cookies")
 			return
 			// TODO: добавить переадресацию на страницу регистрации?
 		}
@@ -337,13 +336,11 @@ func handleConnections(w http.ResponseWriter, r *http.Request) {
 			Data:       strconv.Itoa(user.Uid),
 		}
 		ws.WriteJSON(event)
-		log.Printf("Имя пользователя: ")
-		log.Print(username)
-		log.Printf(" с uid=%d\n", user.Uid)
+		log.Printf("Username: %s; user ID: %d\n", username, user_id)
 
-		log.Printf("У пользователя %d обнаружено %d чатов\n", user_id, len(clients[user_id].Chat_ids))
+		log.Printf("User %d was found to be in %d chats\n", user_id, len(clients[user_id].Chat_ids))
 		for chat_id := range clients[user_id].Chat_ids {
-			log.Printf("У пользователя %d обнаружен чат %d\n", user_id, chat_id)
+			log.Printf("User %d was found to be in chat %d\n", user_id, chat_id)
 			addUserToChat(chat_id, user.Uid, chats[chat_id].User_infos[user_id].Rights_level, false)
 		}
 
@@ -353,7 +350,7 @@ func handleConnections(w http.ResponseWriter, r *http.Request) {
 			// Читаем новое сообщение от клиента
 			err := ws.ReadJSON(&event)
 			if err != nil {
-				log.Printf("Ошибка чтения события: %v", err)
+				log.Printf("Could not parse event: %v", err)
 				delete(websockets, user.Uid)
 				break
 			}
@@ -379,7 +376,7 @@ func handleEvents() {
 			var msg Message
 			err := json.Unmarshal([]byte(event.Data), &msg)
 			if err != nil {
-				log.Printf("Ошибка чтения сообщения: %v", err)
+				log.Printf("Could not read message: %v", err)
 			}
 
 			if chats[msg.Chat_id].User_infos[msg.Sender.Uid].Is_muted {
@@ -393,7 +390,7 @@ func handleEvents() {
 			chat := &chats[msg.Chat_id]
 			chat.Messages = append(chat.Messages, msg)
 
-			log.Printf("Сообщение от %s в чате с ID %d: %s\n", msg.Sender.Username, msg.Chat_id, msg.Message)
+			log.Printf("New message from user %s in chat %d: %s\n", msg.Sender.Username, msg.Chat_id, msg.Message)
 
 			if msg.Filename != "" {
 				err = os.WriteFile("attachments/"+msg.Filename, []byte(msg.Message), 0644)
@@ -415,7 +412,7 @@ func handleEvents() {
 			var invitation Invitation
 			err := json.Unmarshal([]byte(event.Data), &invitation)
 			if err != nil {
-				log.Printf("Ошибка чтения приглашения: %v", err)
+				log.Printf("Could not parse invitation: %v", err)
 				return
 			}
 
@@ -498,7 +495,7 @@ func handleEvents() {
 			}
 			err := json.Unmarshal([]byte(event.Data), &data)
 			if err != nil {
-				log.Printf("Ошибка чтения добавления коэдита: %v", err)
+				log.Printf("Could not parse adding collaborative editing file: %v", err)
 			}
 
 			coedits = append(coedits, newCoedit(data.Chat_id))
@@ -517,7 +514,7 @@ func handleEvents() {
 			response_data, err := json.Marshal(msg)
 
 			if err != nil {
-				log.Printf("Ошибка создания коэдита")
+				log.Printf("Could not create collaborative editing file.")
 			}
 
 			response := Event{
@@ -531,14 +528,14 @@ func handleEvents() {
 
 			NotifyChat(data.Chat_id, response)
 
-			log.Printf("В чате %d создан коэдит %d пользователем %d", data.Chat_id, msg.Coedit_info.Coedit_id, event.Sender_uid)
+			log.Printf("In chat %d a collaborative editing file %d was created by user %d", data.Chat_id, msg.Coedit_info.Coedit_id, event.Sender_uid)
 		case SYNC_COEDIT:
 			log.Print("Attempt to sync")
 
 			var data SyncCoedit
 			err := json.Unmarshal([]byte(event.Data), &data)
 			if err != nil {
-				log.Printf("Ошибка чтения при попытке синхронизации коэдита")
+				log.Printf("Could not synchronize collaborative editing file")
 			}
 
 			if data.Coedit_id == -1 {
@@ -556,7 +553,7 @@ func handleEvents() {
 			var data SaveCoedit
 			err := json.Unmarshal([]byte(event.Data), &data)
 			if err != nil {
-				log.Printf("Ошибка чтения при попытке сохранения коэдита")
+				log.Printf("Could not save collaborative editing file")
 			}
 
 			coedits[data.Coedit_id].makeSave(data.Name)
@@ -566,12 +563,11 @@ func handleEvents() {
 			var data RevertCoedit
 			err := json.Unmarshal([]byte(event.Data), &data)
 			if err != nil {
-				log.Printf("Ошибка чтения при попытке возврата коэдита")
+				log.Printf("Could not revert collaborative editing file")
 			}
 
-			log.Printf("ПОПЫТКА возврата к %d", data.Version)
 			coedits[data.Coedit_id].revert(data.Version)
-			log.Printf("возврат к %d", coedits[data.Coedit_id].ActualVersion.Version)
+			log.Printf("Collaborative editing file reverted to version %d", coedits[data.Coedit_id].ActualVersion.Version)
 
 			NotifyChat(coedits[data.Coedit_id].Chat_id, WrapCoeditInEvent(data.Coedit_id))
 		}
@@ -595,7 +591,7 @@ func addUserToChat(chat_id int, user_id int, rights_level int, do_notify_others 
 	for _, msg := range chats[chat_id].Messages {
 		bytes, err := json.Marshal(msg)
 		if err != nil {
-			log.Printf("Ошибка восстановления чата: %v", err)
+			log.Printf("Could not retrieve chat: %v", err)
 		}
 		msg_retrieval := Event{
 			Event_type: NEW_MESSAGE,
@@ -651,7 +647,7 @@ func addUserToChat(chat_id int, user_id int, rights_level int, do_notify_others 
 	}
 
 	clients[user_id].Chat_ids[chat_id] = true
-	log.Printf("Пользователь %d добавлен в чат %d\n", user_id, chat_id)
+	log.Printf("User %d was added to chat %d\n", user_id, chat_id)
 
 }
 
@@ -666,7 +662,7 @@ func NotifyUser(user_id int, event Event) {
 	if is_online {
 		err := user_ws.WriteJSON(event)
 		if err != nil {
-			log.Printf("Ошибка записи: %v", err)
+			log.Printf("Could not send event: %v", err)
 			// Зачем удалять пользователя?
 			user_ws.Close()
 			delete(websockets, user_id)
@@ -677,7 +673,7 @@ func NotifyUser(user_id int, event Event) {
 func WrapCoeditInEvent(coedit_id int) Event {
 	response_data, err := json.Marshal(coedits[coedit_id])
 	if err != nil {
-		log.Printf("Ошибка при сборе данных о коэдите")
+		log.Printf("Could not send changes of collaborative editing file")
 	}
 
 	return Event{
