@@ -6,6 +6,7 @@ import (
 	"net/http"
 	"os"
 	"strconv"
+	"sync"
 
 	"github.com/gorilla/websocket"
 )
@@ -235,9 +236,15 @@ type AuthResponse struct {
 	Text          string `json:"text"`
 }
 
+var auth_mutex sync.Mutex
+
 func handleAuth(w http.ResponseWriter, r *http.Request) {
 	switch r.Method {
 	case http.MethodPost:
+
+		auth_mutex.Lock()
+		defer auth_mutex.Unlock()
+
 		var auth_data Authentification
 		json.NewDecoder(r.Body).Decode(&auth_data)
 
@@ -390,7 +397,7 @@ func handleEvents() {
 			chat := &chats[msg.Chat_id]
 			chat.Messages = append(chat.Messages, msg)
 
-			log.Printf("New message from user %s in chat %d: %s\n", msg.Sender.Username, msg.Chat_id, msg.Message)
+			// log.Printf("New message from user %s in chat %d: %s\n", msg.Sender.Username, msg.Chat_id, msg.Message)
 
 			if msg.Filename != "" {
 				err = os.WriteFile("attachments/"+msg.Filename, []byte(msg.Message), 0644)
@@ -587,7 +594,8 @@ func addUserToChat(chat_id int, user_id int, rights_level int, do_notify_others 
 		Data:       strconv.Itoa(chat_id),
 	}
 
-	websockets[user_id].WriteJSON(response)
+	NotifyUser(user_id, response)
+	// websockets[user_id].WriteJSON(response)
 	for _, msg := range chats[chat_id].Messages {
 		bytes, err := json.Marshal(msg)
 		if err != nil {
